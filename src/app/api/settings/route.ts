@@ -24,6 +24,9 @@ export async function PATCH(req: Request) {
   if (typeof patch.followPlayback === "boolean") {
     next.followPlayback = patch.followPlayback;
   }
+  if (typeof patch.syncScroll === "boolean") {
+    next.syncScroll = patch.syncScroll;
+  }
 
   await kv.set(keys.user(user.id), { ...user, settings: next });
   return NextResponse.json({ settings: next });

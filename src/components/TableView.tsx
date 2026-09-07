@@ -13,6 +13,8 @@ type Props = {
   hasAudio: boolean;
   onSeek: (sec: number) => void;
   onSelectBlock: (blockIndex: number) => void;
+  /** 左ペインとのスクロール連動に使う */
+  scrollRef: React.RefObject<HTMLDivElement | null>;
 };
 
 type RowProps = {
@@ -99,6 +101,7 @@ export default function TableView({
   hasAudio,
   onSeek,
   onSelectBlock,
+  scrollRef,
 }: Props) {
   const [includeTime, setIncludeTime] = useState(false);
   const [copied, setCopied] = useState("");
@@ -144,7 +147,7 @@ export default function TableView({
         {copied ? <span className="muted">{copied}</span> : null}
       </div>
 
-      <div className="table-scroll">
+      <div className="table-scroll" ref={scrollRef}>
         <table className="minutes">
           {/* 幅を固定しておかないと、長い話者名ひとつで列幅が崩れる */}
           <colgroup>

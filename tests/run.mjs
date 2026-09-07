@@ -55,6 +55,7 @@ if (started) {
 const suites = [
   ["編集", "./editor.test.mjs"],
   ["音声連動", "./audio.test.mjs"],
+  ["スクロール連動", "./scrollsync.test.mjs"],
   ["データ分離", "./isolation.test.mjs"],
   ["大きな議事録", "./performance.test.mjs"],
 ];

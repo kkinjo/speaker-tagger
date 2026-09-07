@@ -28,6 +28,8 @@ export type UserSettings = {
   paneMode: PaneMode;
   playbackRate: number;
   followPlayback: boolean;
+  /** 左右のペインのスクロールを連動させるか */
+  syncScroll: boolean;
 };
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -35,6 +37,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   paneMode: "both",
   playbackRate: 1,
   followPlayback: true,
+  syncScroll: true,
 };
 
 export type User = {

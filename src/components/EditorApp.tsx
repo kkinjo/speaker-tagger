@@ -52,6 +52,7 @@ export default function EditorApp({
   const [paneMode, setPaneMode] = useState<PaneMode>(settings.paneMode);
   const [rate, setRate] = useState(settings.playbackRate);
   const [follow, setFollow] = useState(settings.followPlayback);
+  const [syncScroll, setSyncScroll] = useState(settings.syncScroll);
   const [drawerOpen, setDrawerOpen] = useState(!project.imported);
   const [caretOffset, setCaretOffset] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>("saved");
@@ -65,6 +66,9 @@ export default function EditorApp({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  /** 自分で動かしたスクロールを連動処理が拾い返さないようにするための猶予 */
+  const suppressSyncUntil = useRef(0);
 
   /* ---- 解析 ---- */
   const doc = useMemo(
@@ -196,6 +200,7 @@ export default function EditorApp({
     paneMode,
     playbackRate: rate,
     followPlayback: follow,
+    syncScroll,
   };
 
   const saveSettings = useCallback((keepalive: boolean) => {
@@ -210,7 +215,7 @@ export default function EditorApp({
   useEffect(() => {
     const t = setTimeout(() => saveSettings(false), 400);
     return () => clearTimeout(t);
-  }, [fontSize, paneMode, rate, follow, saveSettings]);
+  }, [fontSize, paneMode, rate, follow, syncScroll, saveSettings]);
 
   // 直後にタブを閉じたり再読み込みしても設定が失われないようにする
   useEffect(() => {
@@ -243,19 +248,149 @@ export default function EditorApp({
     if (el) el.playbackRate = rate;
   }, [rate, audioUrl]);
 
-  /* ---- 位置移動 ---- */
-  const scrollToOffset = useCallback(
-    (offset: number, smooth: boolean) => {
-      const scroller = scrollRef.current;
-      if (!scroller) return;
-      const line = rawText.slice(0, offset).split("\n").length - 1;
-      const overlay = scroller.querySelector(".editor-overlay");
-      const el = overlay?.children[line] as HTMLElement | undefined;
-      if (!el) return;
-      const target = Math.max(0, el.offsetTop - scroller.clientHeight / 3);
-      scroller.scrollTo({ top: target, behavior: smooth ? "smooth" : "auto" });
+  /* ---- 左右の位置合わせ ---- */
+
+  /**
+   * 左右のペインは高さがまったく違うので、画素の割合では対応づかない。
+   * 代わりに「ブロック（表の1行）」を共通の目印にする。左の装飾レイヤの行と
+   * 右の表の行は同じブロック番号で1対1に対応するので、
+   * 「上端に見えているのは何番のブロックの何割の位置か」を移し替えれば、
+   * 高さの違いに関係なく同じ場所を指せる。
+   */
+  type Pane = "left" | "right";
+  type Anchor = { block: number; fraction: number };
+
+  /** ブロック番号 -> 左ペインでの行番号 */
+  const blockLine = useMemo(() => {
+    const result = new Array<number>(doc.blocks.length).fill(0);
+    let line = 0;
+    let bi = 0;
+    for (let i = 0; i < rawText.length && bi < doc.blocks.length; i++) {
+      while (bi < doc.blocks.length && doc.blocks[bi].start === i) {
+        result[bi] = line;
+        bi++;
+      }
+      if (rawText[i] === "\n") line++;
+    }
+    while (bi < doc.blocks.length) {
+      result[bi] = line;
+      bi++;
+    }
+    return result;
+  }, [rawText, doc.blocks]);
+
+  const scrollerOf = useCallback(
+    (pane: Pane) => (pane === "left" ? scrollRef.current : tableScrollRef.current),
+    []
+  );
+
+  const blockElement = useCallback(
+    (pane: Pane, block: number): HTMLElement | null => {
+      if (pane === "left") {
+        const overlay = scrollRef.current?.querySelector(".editor-overlay");
+        return (overlay?.children[blockLine[block]] as HTMLElement) ?? null;
+      }
+      const body = tableScrollRef.current?.querySelector("tbody");
+      return (body?.children[block] as HTMLElement) ?? null;
     },
-    [rawText]
+    [blockLine]
+  );
+
+  /** ブロックの上端が、そのペインのスクロール内容の何 px 目にあるか */
+  const blockTop = useCallback(
+    (pane: Pane, block: number, scrollerTop: number): number | null => {
+      const scroller = scrollerOf(pane);
+      const el = blockElement(pane, block);
+      if (!scroller || !el) return null;
+      return el.getBoundingClientRect().top - scrollerTop + scroller.scrollTop;
+    },
+    [blockElement, scrollerOf]
+  );
+
+  /** ブロックが占める範囲。末尾のブロックだけは自身の高さを使う */
+  const blockSpan = useCallback(
+    (pane: Pane, block: number, scrollerTop: number) => {
+      const top = blockTop(pane, block, scrollerTop);
+      if (top == null) return null;
+      const next =
+        block + 1 < doc.blocks.length ? blockTop(pane, block + 1, scrollerTop) : null;
+      const height = blockElement(pane, block)?.offsetHeight ?? 1;
+      return { top, span: Math.max(1, (next ?? top + height) - top) };
+    },
+    [blockTop, blockElement, doc.blocks.length]
+  );
+
+  /** そのペインの上端が、どのブロックのどのあたりかを読み取る */
+  const readAnchor = useCallback(
+    (pane: Pane): Anchor | null => {
+      const scroller = scrollerOf(pane);
+      if (!scroller || doc.blocks.length === 0) return null;
+      const scrollerTop = scroller.getBoundingClientRect().top;
+      const y = scroller.scrollTop;
+
+      let lo = 0;
+      let hi = doc.blocks.length - 1;
+      let found = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const top = blockTop(pane, mid, scrollerTop);
+        if (top == null) return null;
+        if (top <= y) {
+          found = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+
+      const range = blockSpan(pane, found, scrollerTop);
+      if (!range) return null;
+      return {
+        block: found,
+        fraction: Math.min(1, Math.max(0, (y - range.top) / range.span)),
+      };
+    },
+    [scrollerOf, doc.blocks.length, blockTop, blockSpan]
+  );
+
+  /** 読み取った位置を、もう片方のペインへ移し替える */
+  const applyAnchor = useCallback(
+    (pane: Pane, anchor: Anchor) => {
+      const scroller = scrollerOf(pane);
+      if (!scroller) return;
+      const range = blockSpan(pane, anchor.block, scroller.getBoundingClientRect().top);
+      if (!range) return;
+      scroller.scrollTop = range.top + anchor.fraction * range.span;
+    },
+    [scrollerOf, blockSpan]
+  );
+
+  /** ブロックを画面の上から 1/3 の位置へ持ってくる */
+  const scrollPaneToBlock = useCallback(
+    (pane: Pane, block: number, smooth: boolean) => {
+      const scroller = scrollerOf(pane);
+      if (!scroller) return;
+      const top = blockTop(pane, block, scroller.getBoundingClientRect().top);
+      if (top == null) return;
+      scroller.scrollTo({
+        top: Math.max(0, top - scroller.clientHeight / 3),
+        behavior: smooth ? "smooth" : "auto",
+      });
+    },
+    [scrollerOf, blockTop]
+  );
+
+  /** 両ペインをまとめて同じブロックへ寄せる (ジャンプ・行クリック・再生追従) */
+  const scrollBlockIntoView = useCallback(
+    (block: number, smooth: boolean) => {
+      // 2 つのスクロールが互いを引っぱり合わないよう、連動処理を一時的に止める
+      suppressSyncUntil.current = performance.now() + 700;
+      scrollPaneToBlock("left", block, smooth);
+      if (paneMode === "both" && syncScroll) {
+        scrollPaneToBlock("right", block, smooth);
+      }
+    },
+    [scrollPaneToBlock, paneMode, syncScroll]
   );
 
   const seek = useCallback((sec: number) => {
@@ -280,8 +415,8 @@ export default function EditorApp({
       todos.find((b) => b.start > caretOffset) ?? todos[0];
     if (ta) moveCaret(ta, next.start, true);
     setCaretOffset(next.start);
-    scrollToOffset(next.start, true);
-  }, [doc, caretOffset, scrollToOffset]);
+    scrollBlockIntoView(next.index, true);
+  }, [doc, caretOffset, scrollBlockIntoView]);
 
   const insertSeparator = useCallback(() => {
     const ta = textareaRef.current;
@@ -305,11 +440,11 @@ export default function EditorApp({
       const ta = textareaRef.current;
       if (ta && paneMode !== "right") moveCaret(ta, block.start);
       setCaretOffset(block.start);
-      scrollToOffset(block.start, true);
+      scrollBlockIntoView(blockIndex, true);
       const t = times[blockIndex]?.start;
       if (t != null && audioUrl) seek(t);
     },
-    [doc.blocks, paneMode, scrollToOffset, times, audioUrl, seek]
+    [doc.blocks, paneMode, scrollBlockIntoView, times, audioUrl, seek]
   );
 
   /* ---- 再生に合わせて左ペインを追従させる ---- */
@@ -318,9 +453,58 @@ export default function EditorApp({
     if (!follow || !playing || activeBlock == null) return;
     if (lastFollowed.current === activeBlock) return;
     lastFollowed.current = activeBlock;
-    const block = doc.blocks[activeBlock];
-    if (block) scrollToOffset(block.start, true);
-  }, [follow, playing, activeBlock, doc.blocks, scrollToOffset]);
+    if (doc.blocks[activeBlock]) scrollBlockIntoView(activeBlock, true);
+  }, [follow, playing, activeBlock, doc.blocks, scrollBlockIntoView]);
+
+  /* ---- 左右のスクロール連動 ---- */
+  // 位置の読み書きは毎入力で作り直されるので、ref 経由で最新版を使う。
+  // 依存に入れてしまうと、1 文字打つたびに購読し直して位置がはねてしまう。
+  const readAnchorRef = useRef(readAnchor);
+  readAnchorRef.current = readAnchor;
+  const applyAnchorRef = useRef(applyAnchor);
+  applyAnchorRef.current = applyAnchor;
+
+  useEffect(() => {
+    if (!syncScroll || paneMode !== "both") return;
+    const left = scrollRef.current;
+    const right = tableScrollRef.current;
+    if (!left || !right) return;
+
+    let frame = 0;
+    // 連動で動かした側のスクロールが跳ね返ってこないよう、
+    // 直近に動かした方を「主」として一定時間だけ優先する
+    let driver: Pane | null = null;
+    let driverAt = 0;
+
+    const handle = (pane: Pane) => () => {
+      const now = performance.now();
+      if (now < suppressSyncUntil.current) return;
+      if (driver && driver !== pane && now - driverAt < 150) return;
+      driver = pane;
+      driverAt = now;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const anchor = readAnchorRef.current(pane);
+        if (anchor) applyAnchorRef.current(pane === "left" ? "right" : "left", anchor);
+      });
+    };
+
+    const onLeft = handle("left");
+    const onRight = handle("right");
+    left.addEventListener("scroll", onLeft, { passive: true });
+    right.addEventListener("scroll", onRight, { passive: true });
+
+    // 連動を入れた直後・表示を切り替えた直後は位置が揃っていないので一度合わせる
+    const initial = readAnchorRef.current("left");
+    if (initial) applyAnchorRef.current("right", initial);
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      left.removeEventListener("scroll", onLeft);
+      right.removeEventListener("scroll", onRight);
+    };
+  }, [syncScroll, paneMode]);
 
   /* ---- ショートカット ---- */
   useEffect(() => {
@@ -396,6 +580,10 @@ export default function EditorApp({
         case "KeyA":
           e.preventDefault();
           openMention();
+          break;
+        case "KeyS":
+          e.preventDefault();
+          setSyncScroll((v) => !v);
           break;
         default:
           break;
@@ -517,6 +705,15 @@ export default function EditorApp({
           </button>
         </div>
 
+        <button
+          className={`btn btn-sm${syncScroll ? " btn-on" : ""}`}
+          onClick={() => setSyncScroll((v) => !v)}
+          disabled={paneMode !== "both"}
+          title="左右のスクロールを連動させる（Alt+S）"
+        >
+          ⇅ 連動{syncScroll ? "中" : "オフ"}
+        </button>
+
         <label
           style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}
           title="文字サイズ（Alt+- / Alt+=）"
@@ -616,6 +813,9 @@ export default function EditorApp({
               <kbd>Alt</kbd>+<kbd>A</kbd> 話者を選ぶ（<kbd>@</kbd>）
             </span>
             <span>
+              <kbd>Alt</kbd>+<kbd>S</kbd> 左右のスクロール連動を切替
+            </span>
+            <span>
               <kbd>Ctrl</kbd>+<kbd>Z</kbd> 取り消し / <kbd>Ctrl</kbd>+
               <kbd>Shift</kbd>+<kbd>Z</kbd> やり直し
             </span>
@@ -666,6 +866,7 @@ export default function EditorApp({
             hasAudio={Boolean(audioUrl)}
             onSeek={seek}
             onSelectBlock={selectBlock}
+            scrollRef={tableScrollRef}
           />
         ) : null}
       </div>
