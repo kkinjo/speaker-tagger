@@ -19,6 +19,7 @@ import TableView from "./TableView";
 import AudioBar from "./AudioBar";
 import ParticipantsPanel from "./ParticipantsPanel";
 import ImportPanel from "./ImportPanel";
+import HelpModal from "./HelpModal";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 
@@ -54,6 +55,7 @@ export default function EditorApp({
   const [follow, setFollow] = useState(settings.followPlayback);
   const [syncScroll, setSyncScroll] = useState(settings.syncScroll);
   const [drawerOpen, setDrawerOpen] = useState(!project.imported);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [caretOffset, setCaretOffset] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>("saved");
 
@@ -686,6 +688,7 @@ export default function EditorApp({
             className={`btn btn-sm${paneMode === "left" ? " btn-on" : ""}`}
             onClick={() => setPaneMode("left")}
             title="左のみ（Alt+1）"
+            aria-pressed={paneMode === "left"}
           >
             左
           </button>
@@ -693,6 +696,7 @@ export default function EditorApp({
             className={`btn btn-sm${paneMode === "both" ? " btn-on" : ""}`}
             onClick={() => setPaneMode("both")}
             title="両方（Alt+2）"
+            aria-pressed={paneMode === "both"}
           >
             両方
           </button>
@@ -700,6 +704,7 @@ export default function EditorApp({
             className={`btn btn-sm${paneMode === "right" ? " btn-on" : ""}`}
             onClick={() => setPaneMode("right")}
             title="右のみ（Alt+3）"
+            aria-pressed={paneMode === "right"}
           >
             右
           </button>
@@ -710,6 +715,7 @@ export default function EditorApp({
           onClick={() => setSyncScroll((v) => !v)}
           disabled={paneMode !== "both"}
           title="左右のスクロールを連動させる（Alt+S）"
+          aria-pressed={syncScroll}
         >
           ⇅ 連動{syncScroll ? "中" : "オフ"}
         </button>
@@ -733,13 +739,19 @@ export default function EditorApp({
         <button
           className={`btn btn-sm${drawerOpen ? " btn-on" : ""}`}
           onClick={() => setDrawerOpen((v) => !v)}
+          aria-pressed={drawerOpen}
         >
           {drawerOpen ? "設定を閉じる" : "取り込み・参加者"}
+        </button>
+        <button className="btn btn-sm" onClick={() => setHelpOpen(true)}>
+          使い方
         </button>
         <span className="muted" style={{ fontSize: 12 }}>
           {username}
         </span>
       </header>
+
+      {helpOpen ? <HelpModal onClose={() => setHelpOpen(false)} /> : null}
 
       {drawerOpen ? (
         <div className="drawer">
@@ -785,41 +797,6 @@ export default function EditorApp({
             participants={participants}
             onChange={setParticipants}
           />
-
-          <div className="shortcut-list">
-            <span>
-              <kbd>Space</kbd> 再生 / 一時停止（<kbd>Ctrl</kbd>+<kbd>Space</kbd>
-              は編集中でも）
-            </span>
-            <span>
-              <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> 3秒 戻す / 進める
-            </span>
-            <span>
-              <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> 再生速度
-            </span>
-            <span>
-              <kbd>Alt</kbd>+<kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> 左 / 両方 / 右
-            </span>
-            <span>
-              <kbd>Alt</kbd>+<kbd>-</kbd>/<kbd>=</kbd> 文字サイズ
-            </span>
-            <span>
-              <kbd>Alt</kbd>+<kbd>J</kbd> 未割り当ての次へ
-            </span>
-            <span>
-              <kbd>Alt</kbd>+<kbd>D</kbd> 区切り <code>--</code> を入れる
-            </span>
-            <span>
-              <kbd>Alt</kbd>+<kbd>A</kbd> 話者を選ぶ（<kbd>@</kbd>）
-            </span>
-            <span>
-              <kbd>Alt</kbd>+<kbd>S</kbd> 左右のスクロール連動を切替
-            </span>
-            <span>
-              <kbd>Ctrl</kbd>+<kbd>Z</kbd> 取り消し / <kbd>Ctrl</kbd>+
-              <kbd>Shift</kbd>+<kbd>Z</kbd> やり直し
-            </span>
-          </div>
         </div>
       ) : null}
 
