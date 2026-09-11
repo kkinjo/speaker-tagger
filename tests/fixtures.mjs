@@ -98,10 +98,23 @@ export function buildFixtures() {
     JSON.stringify(buildTranscript(longRows, 3, 0.14))
   );
 
+  // 整文画面の中断ボタンのテスト用。big ほど大きくすると 1 行あたりの
+  // ダミー変換に time がかかりすぎ、逆に sample (9 行) では一括変換が
+  // 一瞬で終わってしまい中断を挟めない。数百行規模で確実に間に合わせる。
+  const mediumRows = Array.from({ length: 200 }, (_, i) => [
+    `SPEAKER_0${i % 4}`,
+    LONG[i % LONG.length],
+  ]);
+  fs.writeFileSync(
+    path.join(FIXTURES, "medium.json"),
+    JSON.stringify(buildTranscript(mediumRows, 4, 0.18))
+  );
+
   fs.writeFileSync(path.join(FIXTURES, "meeting.wav"), buildWav(25));
 
   return {
     sample: path.join(FIXTURES, "sample.json"),
+    medium: path.join(FIXTURES, "medium.json"),
     big: path.join(FIXTURES, "big.json"),
     wav: path.join(FIXTURES, "meeting.wav"),
   };

@@ -18,6 +18,7 @@ import RawEditor from "./RawEditor";
 import TableView from "./TableView";
 import AudioBar from "./AudioBar";
 import ParticipantsPanel from "./ParticipantsPanel";
+import GlossaryPanel from "./GlossaryPanel";
 import ImportPanel from "./ImportPanel";
 import HelpModal from "./HelpModal";
 import ProjectNav from "./ProjectNav";
@@ -46,6 +47,7 @@ export default function EditorApp({
   const [mru, setMru] = useState<string[]>(project.mru);
   const [hints, setHints] = useState<number[]>(project.hints);
   const [audioMeta, setAudioMeta] = useState(project.audio);
+  const [glossary, setGlossary] = useState<string[]>(project.glossary);
   const [imported, setImported] = useState(project.imported);
   const [wordData, setWordData] = useState<ProjectWords | null>(words);
 
@@ -128,8 +130,8 @@ export default function EditorApp({
   /* ---- 保存 ---- */
   const dirtyRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const payloadRef = useRef({ title, rawText, participants, mru, audioMeta });
-  payloadRef.current = { title, rawText, participants, mru, audioMeta };
+  const payloadRef = useRef({ title, rawText, participants, mru, audioMeta, glossary });
+  payloadRef.current = { title, rawText, participants, mru, audioMeta, glossary };
   const firstRender = useRef(true);
 
   const save = useCallback(async () => {
@@ -144,6 +146,7 @@ export default function EditorApp({
           participants: payloadRef.current.participants,
           mru: payloadRef.current.mru,
           audio: payloadRef.current.audioMeta,
+          glossary: payloadRef.current.glossary,
         }),
       });
       if (!res.ok) throw new Error("save failed");
@@ -166,7 +169,7 @@ export default function EditorApp({
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [title, rawText, participants, mru, audioMeta, save]);
+  }, [title, rawText, participants, mru, audioMeta, glossary, save]);
 
   // 未保存のまま閉じようとしたら、送れるだけ送りつつ引き止める
   useEffect(() => {
@@ -184,6 +187,7 @@ export default function EditorApp({
           participants: payloadRef.current.participants,
           mru: payloadRef.current.mru,
           audio: payloadRef.current.audioMeta,
+          glossary: payloadRef.current.glossary,
         }),
         keepalive: true,
       });
@@ -799,6 +803,9 @@ export default function EditorApp({
             participants={participants}
             onChange={setParticipants}
           />
+
+          <hr style={{ border: 0, borderTop: "1px solid var(--border)", margin: "14px 0" }} />
+          <GlossaryPanel glossary={glossary} onChange={setGlossary} />
         </div>
       ) : null}
 

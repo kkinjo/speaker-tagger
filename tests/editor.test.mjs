@@ -18,7 +18,9 @@ export default async function run() {
     r.check("話者交代の位置に区切りが入る", rawText.includes("\n--\n"));
 
     // 参加者の登録
-    await page.getByRole("button", { name: "まとめて貼り付け" }).click();
+    // 「まとめて貼り付け」ボタンは参加者の登録・固有名詞の登録の両方にあるので、
+    // 先に表示される参加者の登録側を指定する
+    await page.getByRole("button", { name: "まとめて貼り付け" }).first().click();
     await page
       .locator("textarea[placeholder^='1行に1人']")
       .fill("●●小/太田\n県教委/山田\n●●小/田中");

@@ -14,7 +14,7 @@ await newProject(page, "6月 校内研修 打合せ");
 await page.screenshot({ path: `${out}/02-empty.png` });
 
 await importJson(page, files.sample);
-await page.getByRole("button", { name: "まとめて貼り付け" }).click();
+await page.getByRole("button", { name: "まとめて貼り付け" }).first().click();
 await page
   .locator("textarea[placeholder^='1行に1人']")
   .fill("●●小/太田\n県教委/山田\n●●小/田中");

@@ -825,3 +825,191 @@ table.minutes tr.row-done td.speaker {
   font-size: 16px;
   margin: 0 0 8px;
 }
+
+/* ---------- 固有名詞の登録（GlossaryPanel） ---------- */
+
+.glossary-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 10px;
+}
+
+.glossary-col-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+
+.glossary-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.glossary-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding: 3px 0;
+}
+
+.glossary-list-readonly li {
+  color: var(--fg-muted);
+}
+
+.glossary-dup-note {
+  font-size: 11px;
+}
+
+/* ---------- 整文画面（RefineApp） ---------- */
+
+.refine-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+}
+
+.refine-app {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.refine-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.refine-progress {
+  font-size: 13px;
+}
+
+.refine-progress strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.refine-table-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  padding: 0 16px 16px;
+}
+
+table.refine-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  font-size: 14px;
+  background: #fff;
+}
+
+table.refine-table col.refine-col-status {
+  width: 64px;
+}
+
+table.refine-table th,
+table.refine-table td {
+  border: 1px solid var(--border-strong);
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: left;
+}
+
+table.refine-table thead th {
+  background: #eef1f5;
+  font-size: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.refine-heading-row td {
+  background: #e8eef7;
+  font-weight: 600;
+}
+
+.refine-speaker {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-bottom: 2px;
+}
+
+.refine-body {
+  white-space: pre-wrap;
+}
+
+.refine-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.refine-status {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  flex: none;
+}
+
+.refine-status-done {
+  background: var(--accent);
+}
+
+.refine-status-edited {
+  background: var(--ok);
+}
+
+.refine-status-error {
+  background: var(--danger);
+}
+
+.refine-status-pending {
+  background: var(--accent);
+  animation: refine-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes refine-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.refine-output textarea {
+  width: 100%;
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 14px;
+  padding: 2px 4px;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: var(--fg);
+}
+
+.refine-output textarea:focus {
+  border: 1px solid var(--border-strong);
+}
+
+.refine-output textarea::placeholder {
+  color: var(--fg-muted);
+}

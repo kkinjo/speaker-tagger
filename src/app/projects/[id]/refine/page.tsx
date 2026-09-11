@@ -2,12 +2,14 @@ import { notFound, redirect } from "next/navigation";
 import { currentUser } from "@/lib/auth";
 import { loadOwned } from "@/lib/projects";
 import ProjectNav from "@/components/ProjectNav";
+import RefineApp from "@/components/RefineApp";
 
 export const dynamic = "force-dynamic";
 
 /**
- * 整文画面（②）。ステップ3時点ではナビゲーションのみの空ページ。
- * 中身（第4章・第5章）は次回以降に実装する。
+ * 整文画面（②）。第4章の UI。
+ * 実際の Anthropic API 連携（第8章 実装の順序 #7）はまだ行わず、
+ * ダミー実装（src/editor/refineClient.ts）で代替している。
  */
 export default async function RefinePage({
   params,
@@ -21,17 +23,12 @@ export default async function RefinePage({
   if (!project) notFound();
 
   return (
-    <>
+    <div className="refine-page">
       <header className="topbar">
         <ProjectNav projectId={project.id} current="refine" />
         <span style={{ fontWeight: 600 }}>{project.title}</span>
       </header>
-      <div className="stub-page">
-        <h1>整文画面</h1>
-        <p className="muted">
-          口語の簡素化・体言止め化を行う画面です。準備中のため、現在は表示できません。
-        </p>
-      </div>
-    </>
+      <RefineApp project={project} />
+    </div>
   );
 }

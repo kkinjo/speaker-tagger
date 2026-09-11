@@ -69,6 +69,20 @@ export async function newProject(page, title) {
   return page.url();
 }
 
+/**
+ * 既にログイン済みのセッションで、もう1つ議事録を作る。
+ * `/login` はログイン済みだと `/projects` へ自動でリダイレクトされるため、
+ * 1つのテスト内で複数プロジェクトを作りたいときは newProject ではなく
+ * こちらを使う。
+ */
+export async function createProject(page, title) {
+  await page.goto(`${BASE}/projects`);
+  await page.locator('input[placeholder^="例）"]').fill(title);
+  await page.getByRole("button", { name: "作成する" }).click();
+  await page.waitForURL(/\/projects\/[^/]+$/);
+  return page.url();
+}
+
 /** WhisperX の JSON を取り込み、左ペインに反映されるまで待つ */
 export async function importJson(page, file, minChars = 50) {
   await page.locator('input[type="file"][accept*="json"]').setInputFiles(file);
