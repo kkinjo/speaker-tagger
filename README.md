@@ -8,6 +8,17 @@ WhisperX の文字起こし（単語単位タイムスタンプ付き）を、
 - 右：それをそのまま反映した表（話者・発言内容）
 - 下：音声を聞きながら編集するための再生バー
 
+議事録作成は3画面に分かれています（タブではなく別 URL）。
+
+| # | 画面 | URL | 役割 |
+|---|---|---|---|
+| ① | 話者整理画面 | `/projects/{id}` | 発言の区切り・話者の割り当て・誤字修正（本 README の対象） |
+| ② | 整文画面 | `/projects/{id}/refine` | 口語の簡素化・体言止め化（準備中） |
+| ③ | 出力画面 | `/projects/{id}/export` | 列を選んで Word 用にコピー（準備中） |
+
+①②③は相互に行き来でき、各画面上部の共通ナビゲーションとプロジェクト一覧の
+各行から直接遷移できます。②③は現時点では準備中のプレースホルダーです。
+
 ---
 
 ## できること
@@ -160,17 +171,22 @@ Netlify / Cloudflare Pages / 自前サーバーでも、上記の環境変数を
 
 ## テスト
 
-実際のブラウザ（Chromium）でひととおりの操作を通します。
+型チェックと、実際のブラウザ（Chromium）でのひととおりの操作確認の両方があります。
 
 ```bash
+npm run typecheck
 npm run build
 npm run test:e2e
 ```
 
+- `tests/sourceKey.test.mjs` … ブラウザ不要。本文が同じなら同じキー、違えば違うキーになること
+- `tests/normalizeProject.test.mjs` … ブラウザ不要。`refinements`/`glossary` が無い既存データを壊さず読めること
 - `tests/editor.test.mjs` … 取り込み、`@` サジェスト、区切り、見出し、表、取り消し、Word 向けコピー
 - `tests/audio.test.mjs` … 再生・シーク・追従ハイライト・ショートカット、音声がサーバーへ送られないこと
 - `tests/scrollsync.test.mjs` … 左右で高さが 1.8 倍違う状態でも、上端に同じ発言が来ること
-- `tests/isolation.test.mjs` … 他ユーザーのデータに触れないこと
+- `tests/nav.test.mjs` … ①②③の3 URL が相互に行き来でき、ブラウザの戻るも効くこと
+- `tests/refinements.test.mjs` … `Project.refinements`/`glossary` の保存・読み込み（API レベル）
+- `tests/isolation.test.mjs` … 他ユーザーのデータに触れないこと（新設の②③も含む）
 - `tests/performance.test.mjs` … 1 時間規模（約 2,500 発言・2 万語）での入力の重さと時刻の正しさ
 
 テスト用の入力ファイルは `tests/fixtures.mjs` が生成します（リポジトリには含みません）。

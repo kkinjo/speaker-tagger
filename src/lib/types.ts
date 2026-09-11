@@ -59,6 +59,19 @@ export type ProjectSummary = {
   hasAudio: boolean;
 };
 
+/** 1行分の整文結果 */
+export type Refinement = {
+  /** 整文後のテキスト */
+  text: string;
+  /** AI 出力後に人が手で直したか */
+  edited: boolean;
+  /** 最終更新時刻 */
+  updatedAt: number;
+};
+
+/** 整文結果の集合。キーは sourceKey(block) (src/editor/refine.ts) */
+export type Refinements = Record<string, Refinement>;
+
 /** 編集対象の本体。words は別レコードに分けて保存する */
 export type Project = {
   id: string;
@@ -77,7 +90,24 @@ export type Project = {
   audio: { name: string; size: number; type: string } | null;
   /** 取り込み済みか */
   imported: boolean;
+  /** 整文画面の結果。キーは本文ハッシュ (sourceKey) */
+  refinements: Refinements;
+  /** この会議固有の固有名詞（全体リストは src/lib/glossary.ts 側） */
+  glossary: string[];
 };
+
+/**
+ * KV から読み出した Project を正規化する。
+ * refinements / glossary は後から追加したフィールドなので、
+ * それ以前に保存された既存プロジェクトには存在しない。
+ */
+export function normalizeProject(project: Project): Project {
+  return {
+    ...project,
+    refinements: project.refinements ?? {},
+    glossary: project.glossary ?? [],
+  };
+}
 
 /** 単語列は更新頻度が低く量が多いので別キーに保存する */
 export type ProjectWords = {

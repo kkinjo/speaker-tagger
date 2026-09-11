@@ -43,6 +43,15 @@ export async function PATCH(req: Request, { params }: Ctx) {
   if (patch.audio === null || (patch.audio && typeof patch.audio === "object")) {
     next.audio = patch.audio;
   }
+  if (patch.refinements && typeof patch.refinements === "object") {
+    next.refinements = patch.refinements;
+  }
+  if (Array.isArray(patch.glossary)) {
+    next.glossary = patch.glossary
+      .filter((t): t is string => typeof t === "string")
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
   next.updatedAt = Date.now();
 
   await kv.set(keys.project(next.id), next);

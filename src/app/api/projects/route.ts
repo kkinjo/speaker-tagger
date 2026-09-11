@@ -30,6 +30,8 @@ export async function POST(req: Request) {
     hints: [],
     audio: null,
     imported: false,
+    refinements: {},
+    glossary: [],
   };
 
   await kv.set(keys.project(project.id), project);

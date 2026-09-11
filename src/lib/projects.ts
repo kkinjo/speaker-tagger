@@ -1,5 +1,5 @@
 import { kv, keys } from "./kv";
-import type { Project, ProjectSummary } from "./types";
+import { normalizeProject, type Project, type ProjectSummary } from "./types";
 
 /** 指定ユーザーのものであることを確認したうえでプロジェクトを返す */
 export async function loadOwned(
@@ -8,7 +8,9 @@ export async function loadOwned(
 ): Promise<Project | null> {
   const project = await kv.get<Project>(keys.project(projectId));
   if (!project || project.userId !== userId) return null;
-  return project;
+  // refinements / glossary は後から追加したフィールドなので、
+  // それ以前に保存された既存プロジェクトを読むときに補う
+  return normalizeProject(project);
 }
 
 export async function listSummaries(userId: string): Promise<ProjectSummary[]> {

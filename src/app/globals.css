@@ -788,3 +788,40 @@ table.minutes tr.row-done td.speaker {
   background: #eef1f5;
   font-size: 12px;
 }
+
+/* ---------- 画面ナビゲーション（話者整理／整文／出力） ---------- */
+
+.project-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-nav-link {
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.project-nav-link:hover {
+  text-decoration: underline;
+}
+
+/* 現在地は色を変えずに、太字とテキストだけで示す（リンクにしない） */
+.project-nav-current {
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.stub-page {
+  max-width: 640px;
+  margin: 48px auto 0;
+  padding: 0 16px;
+}
+
+.stub-page h1 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}

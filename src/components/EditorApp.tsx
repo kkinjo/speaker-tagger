@@ -20,6 +20,7 @@ import AudioBar from "./AudioBar";
 import ParticipantsPanel from "./ParticipantsPanel";
 import ImportPanel from "./ImportPanel";
 import HelpModal from "./HelpModal";
+import ProjectNav from "./ProjectNav";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 
@@ -641,9 +642,7 @@ export default function EditorApp({
       style={{ ["--editor-size" as string]: `${fontSize}px` } as React.CSSProperties}
     >
       <header className="topbar">
-        <a href="/projects" className="btn btn-sm" title="一覧へ戻る">
-          ← 一覧
-        </a>
+        <ProjectNav projectId={project.id} current="editor" />
         <input
           type="text"
           value={title}

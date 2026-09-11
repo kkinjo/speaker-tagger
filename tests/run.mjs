@@ -53,9 +53,13 @@ if (started) {
 }
 
 const suites = [
+  ["sourceKey", "./sourceKey.test.mjs"],
+  ["normalizeProject", "./normalizeProject.test.mjs"],
   ["編集", "./editor.test.mjs"],
   ["音声連動", "./audio.test.mjs"],
   ["スクロール連動", "./scrollsync.test.mjs"],
+  ["画面ナビゲーション", "./nav.test.mjs"],
+  ["整文フィールドの保存・読み込み", "./refinements.test.mjs"],
   ["データ分離", "./isolation.test.mjs"],
   ["大きな議事録", "./performance.test.mjs"],
 ];

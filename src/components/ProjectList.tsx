@@ -106,6 +106,12 @@ export default function ProjectList({
                 <a className="title" href={`/projects/${p.id}`}>
                   {p.title}
                 </a>
+                <a className="project-nav-link" href={`/projects/${p.id}/refine`}>
+                  整文
+                </a>
+                <a className="project-nav-link" href={`/projects/${p.id}/export`}>
+                  出力
+                </a>
                 {p.hasAudio ? <span className="badge">音声あり</span> : null}
                 <div className="spacer" />
                 <span className="muted" style={{ fontSize: 12 }}>
