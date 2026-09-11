@@ -15,7 +15,15 @@ export default async function run() {
 
     const rawText = await page.locator("textarea.editor-input").inputValue();
     r.check("JSON が左ペインに取り込まれる", rawText.includes("おはようございます"));
-    r.check("話者交代の位置に区切りが入る", rawText.includes("\n--\n"));
+    r.check(
+      "話者交代の位置に区切りが入る",
+      /\n--@\d+(\.\d+)?\n/.test(rawText),
+      JSON.stringify(rawText.slice(0, 60))
+    );
+    r.check(
+      "区切りに時刻が付いている（本文を編集しても失われない）",
+      (rawText.match(/^--@\d+(\.\d+)?$/gm) ?? []).length >= 5
+    );
 
     // 参加者の登録
     // 「まとめて貼り付け」ボタンは参加者の登録・固有名詞の登録の両方にあるので、

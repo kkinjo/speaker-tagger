@@ -1,5 +1,5 @@
 import type { Block } from "./parse";
-import { formatTime } from "./format";
+import { formatBlockTime } from "./format";
 
 export type TableRow = {
   block: Block;
@@ -57,7 +57,7 @@ export function buildTableHtml(rows: TableRow[], options: TableOptions): string 
     }
     parts.push("<tr>");
     if (options.includeTime) {
-      parts.push(`<td style="${cell}">${formatTime(row.time)}</td>`);
+      parts.push(`<td style="${cell}">${formatBlockTime(row.time)}</td>`);
     }
     if (includeSpeaker) {
       parts.push(
@@ -97,7 +97,7 @@ export function buildTableText(rows: TableRow[], options: TableOptions): string 
     }
     lines.push(
       [
-        ...(options.includeTime ? [formatTime(row.time)] : []),
+        ...(options.includeTime ? [formatBlockTime(row.time)] : []),
         ...(includeSpeaker ? [row.block.speakers.join(" / ")] : []),
         bodyOf(row).replace(/\n/g, " "),
       ].join(TAB)

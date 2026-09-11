@@ -1,4 +1,5 @@
 import type { ProjectWords, Word } from "@/lib/types";
+import { separatorLine } from "./parse";
 
 type RawWord = {
   word?: string;
@@ -142,9 +143,14 @@ export function importWhisperX(
     if (spk) prevSpeaker = spk;
   }
 
+  // 各セグメントの先頭単語の時刻。区切り記号に焼き付けて、以後は
+  // 単語データを引き直さずにブロックの時刻として使う
+  const segmentStart = segmentWordStart.map((at) => words[at]?.s ?? null);
+
   const rawText = buildInitialText(
     segmentText,
     segmentSpeaker,
+    segmentStart,
     options.insertSeparatorsAtSpeakerChange
   );
 
@@ -189,6 +195,7 @@ export function buildNorm(words: Word[]): {
 function buildInitialText(
   segmentText: string[],
   segmentSpeaker: (string | undefined)[],
+  segmentStart: (number | null)[],
   insertSeparators: boolean
 ): string {
   const out: string[] = [];
@@ -198,7 +205,9 @@ function buildInitialText(
     if (!text) continue;
     const spk = segmentSpeaker[i];
     if (insertSeparators && i > 0 && spk && spk !== prev) {
-      out.push("--");
+      // 区切りに時刻を持たせておくと、本文をいくら編集しても
+      // 「このブロックは何秒の発言か」が失われない
+      out.push(separatorLine(segmentStart[i]));
     }
     out.push(text);
     if (spk) prev = spk;

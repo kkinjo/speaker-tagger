@@ -70,9 +70,11 @@ export default async function run() {
       "時刻列を含めると3列になる",
       (await page.locator("table.minutes thead th").count()) === 3
     );
+    const exportTimes = await page.locator("table.minutes tbody td.time").allTextContents();
     r.check(
       "時刻が表示される",
-      /\d+:\d\d/.test((await page.locator("table.minutes tbody td.time").first().textContent()) ?? "")
+      exportTimes.filter((t) => /\d+:\d\d/.test(t)).length >= 5,
+      JSON.stringify(exportTimes.slice(0, 4))
     );
 
     // --- 話者列を外す ---

@@ -114,6 +114,82 @@ export default async function run() {
       await page.evaluate(() => !document.querySelector("audio").paused)
     );
     await page.keyboard.press("Shift+Space");
+    await page.waitForTimeout(200);
+
+    /*
+     * ブロックを消してもハイライトが飛ばないこと。
+     * 時刻は区切り記号 `--@12.3` に書いてあるものを使うので、
+     * 本文をどう編集しても対応がずれないはず。
+     */
+    const activeAt = async (sec) => {
+      await page.evaluate((t) => {
+        const el = document.querySelector("audio");
+        el.pause();
+        el.currentTime = t;
+      }, sec);
+      await page.waitForTimeout(400);
+      return (
+        (await page
+          .locator("table.minutes tr.row-active td.body")
+          .textContent()
+          .catch(() => null)) ?? null
+      );
+    };
+
+    const before10s = await activeAt(10);
+    r.check("再生位置に応じて1行が光る", before10s !== null, `${before10s}`);
+
+    const deleted = await page.evaluate(() => {
+      const el = document.querySelector("textarea.editor-input");
+      const re = /\n--@[\d.]+\n/g;
+      const at = [];
+      let m;
+      while ((m = re.exec(el.value)) !== null) at.push(m.index);
+      if (at.length < 2) return 0;
+      // 先頭の2ブロックを、区切りごと消す（3つ目の区切りは残す）
+      el.focus();
+      el.setSelectionRange(0, at[1] + 1);
+      document.execCommand("delete");
+      return 2;
+    });
+    r.check("先頭の2ブロックを削除できた", deleted === 2);
+    await page.waitForTimeout(400);
+
+    const after10s = await activeAt(10);
+    r.check(
+      "ブロックを複数削除してもハイライトが同じ発言を指す",
+      after10s !== null && after10s === before10s,
+      `${before10s} -> ${after10s}`
+    );
+
+    /* 時刻の無い区切り（手書きの `--`）があってもエラーにならない */
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.evaluate(() => {
+      const el = document.querySelector("textarea.editor-input");
+      el.focus();
+      const at = el.value.indexOf("\n") + 1;
+      el.setSelectionRange(at, at);
+      document.execCommand("insertText", false, "--\n時刻の無いブロックです。\n");
+    });
+    await page.waitForTimeout(500);
+    r.check("時刻の無い区切りでもエラーにならない", errors.length === 0, errors.join(" / "));
+    r.check(
+      "時刻の無いブロックの時刻列は空欄になる",
+      (
+        await page
+          .locator("table.minutes tbody tr")
+          .filter({ hasText: "時刻の無いブロックです" })
+          .locator("td.time")
+          .textContent()
+      )?.trim() === ""
+    );
+    const stillActive = await activeAt(10);
+    r.check(
+      "時刻の無いブロックは連動から飛ばされる",
+      stillActive === before10s,
+      `${before10s} -> ${stillActive}`
+    );
 
     await page.reload();
     await page.waitForSelector("audio", { state: "attached", timeout: 8000 });

@@ -8,8 +8,14 @@ import type {
   ProjectWords,
   UserSettings,
 } from "@/lib/types";
-import { blockAtOffset, parseDoc, unassignedBlocks } from "@/editor/parse";
-import { alignNorm, blockTimes, mapHintsToEditor, type BlockTime } from "@/editor/align";
+import {
+  blockAtOffset,
+  blockAtTime,
+  parseDoc,
+  separatorLine,
+  unassignedBlocks,
+} from "@/editor/parse";
+import { alignNorm, mapHintsToEditor, timeAtOffset } from "@/editor/align";
 import { moveCaret, replaceRange } from "@/editor/textEdit";
 import { getAudio, putAudio, deleteAudio } from "@/editor/audioStore";
 import { formatBytes } from "@/editor/format";
@@ -24,8 +30,6 @@ import HelpModal from "./HelpModal";
 import ProjectNav from "./ProjectNav";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
-
-const EMPTY_TIMES: BlockTime[] = [];
 
 export default function EditorApp({
   project,
@@ -81,27 +85,19 @@ export default function EditorApp({
     [rawText, participants]
   );
 
-  // 時刻とヒントは必ず「いま画面にある文章」から求める。
+  // 話者交代ヒント（点線）の位置は必ず「いま画面にある文章」から求める。
   // 一手遅れた文章を混ぜると、ヒントの位置が本文と 1 文字ずつずれ、
   // 装飾レイヤが毎回まるごと描き直しになって入力が重くなる。
+  //
+  // ブロックの時刻はここでは求めない。区切り記号 `--@12.3` に書いてあるものを
+  // そのまま使う（単語データからの逆引きは、本文を編集した時点で総崩れになる）。
   const timing = useMemo(() => {
     if (!wordData || wordData.words.length === 0) {
-      return { times: EMPTY_TIMES, editorHints: [] as number[] };
+      return { map: null as Int32Array | null, editorHints: [] as number[] };
     }
     const map = alignNorm(doc.norm, wordData.norm);
-    return {
-      times: blockTimes(
-        doc.blocks.length,
-        doc.normBlock,
-        map,
-        wordData.normWordIdx,
-        wordData.words
-      ),
-      editorHints: mapHintsToEditor(hints, map, doc.normOffsets),
-    };
+    return { map, editorHints: mapHintsToEditor(hints, map, doc.normOffsets) };
   }, [doc, wordData, hints]);
-
-  const times = timing.times;
 
   const totals = useMemo(() => {
     const utterances = doc.blocks.filter((b) => b.kind === "utterance");
@@ -112,15 +108,8 @@ export default function EditorApp({
   // 再生位置に対応するブロック
   const activeBlock = useMemo(() => {
     if (!playing && currentTime === 0) return null;
-    let found: number | null = null;
-    for (const b of doc.blocks) {
-      const t = times[b.index]?.start;
-      if (t == null) continue;
-      if (t <= currentTime + 0.05) found = b.index;
-      else break;
-    }
-    return found;
-  }, [doc.blocks, times, currentTime, playing]);
+    return blockAtTime(doc.blocks, currentTime);
+  }, [doc.blocks, currentTime, playing]);
 
   const caretBlock = useMemo(
     () => blockAtOffset(doc, caretOffset)?.index ?? null,
@@ -436,8 +425,25 @@ export default function EditorApp({
     const at = ta.selectionStart;
     const before = ta.value.slice(0, at);
     const prefix = before.length === 0 || before.endsWith("\n") ? "" : "\n";
-    replaceRange(ta, at, ta.selectionEnd, `${prefix}--\n`);
-  }, []);
+
+    // ブロックを分割するこの瞬間にだけ単語データを引き、出てきた時刻を
+    // 区切り記号へ焼き付ける。以後この時刻は本文の編集では変わらない。
+    // 単語データで引けないときは、いま聞いている再生位置で代用する。
+    const fromWords =
+      timing.map && wordData
+        ? timeAtOffset(
+            at,
+            doc.normOffsets,
+            timing.map,
+            wordData.normWordIdx,
+            wordData.words
+          )
+        : null;
+    const playhead = audioRef.current?.currentTime ?? 0;
+    const time = fromWords ?? (audioUrl && playhead > 0 ? playhead : null);
+
+    replaceRange(ta, at, ta.selectionEnd, `${prefix}${separatorLine(time)}\n`);
+  }, [timing.map, wordData, doc.normOffsets, audioUrl]);
 
   const openMention = useCallback(() => {
     const ta = textareaRef.current;
@@ -453,10 +459,9 @@ export default function EditorApp({
       if (ta && paneMode !== "right") moveCaret(ta, block.start);
       setCaretOffset(block.start);
       scrollBlockIntoView(blockIndex, true);
-      const t = times[blockIndex]?.start;
-      if (t != null && audioUrl) seek(t);
+      if (block.time != null && audioUrl) seek(block.time);
     },
-    [doc.blocks, paneMode, scrollBlockIntoView, times, audioUrl, seek]
+    [doc.blocks, paneMode, scrollBlockIntoView, audioUrl, seek]
   );
 
   /* ---- 再生に合わせて左ペインを追従させる ---- */
@@ -852,7 +857,6 @@ export default function EditorApp({
         {paneMode !== "left" ? (
           <TableView
             doc={doc}
-            times={times}
             activeBlock={activeBlock}
             hasAudio={Boolean(audioUrl)}
             onSeek={seek}

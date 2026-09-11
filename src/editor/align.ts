@@ -58,46 +58,51 @@ export function alignNorm(edit: string, orig: string): Int32Array {
   return map;
 }
 
-export type BlockTime = { start: number | null; end: number | null };
-
 /**
- * ブロックごとの開始/終了時刻を求める。
- * @param normBlock norm の各文字が属するブロック番号
- * @param map alignNorm の結果
+ * 編集中テキストの文字位置が、音声の何秒にあたるかを引く。
+ *
+ * ブロックを分割する瞬間にだけ使う。結果は区切り記号 `--@12.3` へ焼き付け、
+ * 以後は引き直さない。描画のたびに引き直すと、本文を編集した時点で
+ * 文字オフセットの対応が崩れ、連動位置が飛んでしまう。
+ *
+ * @param offset rawText 内の文字位置
+ * @param normOffsets norm の各文字の rawText 内オフセット (ParsedDoc)
+ * @param map alignNorm の結果 (編集後 norm -> 原文 norm)
  * @param normWordIdx 原文の各文字が属する単語番号
  * @param words 単語ごとの時刻
  */
-export function blockTimes(
-  blockCount: number,
-  normBlock: number[],
+export function timeAtOffset(
+  offset: number,
+  normOffsets: number[],
   map: Int32Array,
   normWordIdx: number[],
   words: { s: number | null; e: number | null }[]
-): BlockTime[] {
-  const first: number[] = new Array(blockCount).fill(-1);
-  const last: number[] = new Array(blockCount).fill(-1);
+): number | null {
+  if (normOffsets.length === 0 || map.length === 0) return null;
 
-  for (let i = 0; i < map.length; i++) {
-    const o = map[i];
-    if (o < 0) continue;
-    const b = normBlock[i];
-    if (b == null) continue;
-    if (first[b] < 0) first[b] = o;
-    last[b] = o;
-  }
-
-  const times: BlockTime[] = [];
-  for (let b = 0; b < blockCount; b++) {
-    if (first[b] < 0) {
-      times.push({ start: null, end: null });
-      continue;
+  // offset 以降で最初の「空白でない文字」を二分探索で探す
+  let lo = 0;
+  let hi = normOffsets.length - 1;
+  let at = normOffsets.length;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (normOffsets[mid] >= offset) {
+      at = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
     }
-    times.push({
-      start: startTimeOfChar(first[b], normWordIdx, words),
-      end: endTimeOfChar(last[b], normWordIdx, words),
-    });
   }
-  return times;
+  if (at >= normOffsets.length) at = normOffsets.length - 1;
+
+  // 加筆された箇所は原文に対応が無いので、少し先まで見て対応の取れる文字を使う
+  for (let i = at; i < map.length && i < at + 200; i++) {
+    if (map[i] >= 0) return startTimeOfChar(map[i], normWordIdx, words);
+  }
+  for (let i = at - 1; i >= 0 && i > at - 200; i--) {
+    if (map[i] >= 0) return endTimeOfChar(map[i], normWordIdx, words);
+  }
+  return null;
 }
 
 /** タイムスタンプ欠損語があるので、前後の語まで探して実測値を拾う */

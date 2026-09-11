@@ -1,13 +1,11 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo } from "react";
 import type { ParsedDoc } from "@/editor/parse";
-import type { BlockTime } from "@/editor/align";
-import { formatTime } from "@/editor/format";
+import { formatBlockTime } from "@/editor/format";
 
 type Props = {
   doc: ParsedDoc;
-  times: BlockTime[];
   activeBlock: number | null;
   hasAudio: boolean;
   onSeek: (sec: number) => void;
@@ -59,10 +57,10 @@ const Row = memo(function Row(props: RowProps) {
             }}
             title="この位置から音声を再生"
           >
-            {formatTime(time)}
+            {formatBlockTime(time)}
           </button>
         ) : (
-          formatTime(time)
+          formatBlockTime(time)
         )}
       </td>
       <td className="speaker">
@@ -89,22 +87,12 @@ const Row = memo(function Row(props: RowProps) {
  */
 export default function TableView({
   doc,
-  times,
   activeBlock,
   hasAudio,
   onSeek,
   onSelectBlock,
   scrollRef,
 }: Props) {
-  const rows = useMemo(
-    () =>
-      doc.blocks.map((block) => ({
-        block,
-        time: times[block.index]?.start ?? null,
-      })),
-    [doc.blocks, times]
-  );
-
   return (
     <div className="pane">
       <div className="pane-header">
@@ -130,21 +118,21 @@ export default function TableView({
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {doc.blocks.length === 0 ? (
               <tr>
                 <td colSpan={3} className="muted">
                   左側にテキストを入力すると、ここに表が表示されます。
                 </td>
               </tr>
             ) : null}
-            {rows.map(({ block, time }) => (
+            {doc.blocks.map((block) => (
               <Row
                 key={block.index}
                 index={block.index}
                 heading={block.kind === "heading" ? block.heading : null}
                 speaker={block.speakers.join(" / ")}
                 body={block.body}
-                time={time}
+                time={block.time}
                 active={block.index === activeBlock}
                 hasAudio={hasAudio}
                 onSeek={onSeek}

@@ -11,6 +11,14 @@ export function formatTime(sec: number | null | undefined): string {
     : `${mm}:${String(s).padStart(2, "0")}`;
 }
 
+/**
+ * 表の「時刻」列用。時刻を持たないブロックは空欄にする。
+ * `--:--` と出すと「取れなかった」のか「そもそも無い」のか分かりにくい。
+ */
+export function formatBlockTime(sec: number | null | undefined): string {
+  return sec == null || !Number.isFinite(sec) ? "" : formatTime(sec);
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

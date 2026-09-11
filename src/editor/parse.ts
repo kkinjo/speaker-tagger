@@ -24,6 +24,15 @@ export type Block = {
   /** @メンションを除いた本文 (改行は保持する) */
   body: string;
   mentions: MentionRange[];
+  /**
+   * このブロックが何秒の発言か (秒)。直前の区切り記号 `--@12.3` に
+   * 書かれている値をそのまま使う。時刻の無い区切り (`--`) や、
+   * 先頭ブロックのように前に区切りが無い場合は null。
+   *
+   * 本文の編集では変わらない。単語データから引き直すと、編集のたびに
+   * 対応が崩れて連動位置が飛ぶため、区切り記号に焼き付けている。
+   */
+  time: number | null;
 };
 
 export type ParsedDoc = {
@@ -32,16 +41,30 @@ export type ParsedDoc = {
   norm: string;
   /** norm の各文字の rawText 内オフセット */
   normOffsets: number[];
-  /** norm の各文字が属するブロック番号 */
-  normBlock: number[];
 };
 
 export const SEPARATOR = "--";
-const SEP_RE = /^[ \t　]*-{2,}[ \t　]*$/;
+/** `--` / `----` / `--@12.3` のいずれも区切りとして扱う */
+const SEP_RE = /^[ \t　]*-{2,}[ \t　]*(?:@[ \t　]*(\d+(?:\.\d+)?))?[ \t　]*$/;
 const HEADING_RE = /^[ \t　]*#+[ \t　]*/;
 
 export function isSeparatorLine(line: string): boolean {
   return SEP_RE.test(line);
+}
+
+/** 区切り行に書かれた時刻 (秒)。`--` だけなら null */
+export function separatorTime(line: string): number | null {
+  const m = SEP_RE.exec(line);
+  if (!m || m[1] === undefined) return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) ? v : null;
+}
+
+/** 時刻付きの区切り行を作る。時刻が分からないときは `--` のまま */
+export function separatorLine(time: number | null): string {
+  if (time == null || !Number.isFinite(time) || time < 0) return SEPARATOR;
+  // 10ms より細かい桁は音声の頭出しに使わないので落とす
+  return `${SEPARATOR}@${Math.round(time * 100) / 100}`;
 }
 
 export function isHeadingLine(line: string): boolean {
@@ -91,43 +114,42 @@ export function parseDoc(raw: string, participants: Participant[]): ParsedDoc {
   const blocks: Block[] = [];
   const norm: string[] = [];
   const normOffsets: number[] = [];
-  const normBlock: number[] = [];
 
   let pendingStart = 0;
   let pendingEnd = 0;
   let hasPending = false;
+  /** 直前に読んだ区切り記号の時刻。次に出来るブロックの時刻になる */
+  let pendingTime: number | null = null;
 
   const flush = () => {
     if (!hasPending) return;
     hasPending = false;
     if (raw.slice(pendingStart, pendingEnd).trim().length === 0) return;
     const index = blocks.length;
-    const extracted = extractBlock(
-      raw,
-      pendingStart,
-      pendingEnd,
-      labels,
-      index,
-      norm,
-      normOffsets,
-      normBlock
-    );
+    const extracted = extractBlock(raw, pendingStart, pendingEnd, labels, norm, normOffsets);
     blocks.push({
       index,
       kind: "utterance",
       start: pendingStart,
       end: pendingEnd,
       heading: "",
+      time: pendingTime,
       ...extracted,
     });
+    // 一度使った時刻は次のブロックへ引き継がない (前のブロックの時刻を
+    // 継承すると、区切りを消したときに嘘の位置を指してしまう)
+    pendingTime = null;
   };
 
   for (const line of lines) {
     if (isSeparatorLine(line.text)) {
       flush();
+      pendingTime = separatorTime(line.text);
       continue;
     }
     if (isHeadingLine(line.text)) {
+      // 見出しは時刻を持たないが、区切りの時刻は消さない。
+      // `--@12.3` の直後に議題見出しを足しても、続く発言の時刻が残るようにする
       flush();
       blocks.push({
         index: blocks.length,
@@ -138,6 +160,7 @@ export function parseDoc(raw: string, participants: Participant[]): ParsedDoc {
         speakers: [],
         body: "",
         mentions: [],
+        time: null,
       });
       continue;
     }
@@ -149,7 +172,27 @@ export function parseDoc(raw: string, participants: Participant[]): ParsedDoc {
   }
   flush();
 
-  return { blocks, norm: norm.join(""), normOffsets, normBlock };
+  return { blocks, norm: norm.join(""), normOffsets };
+}
+
+/**
+ * 再生位置に対応するブロック番号を返す。
+ *
+ * 時刻が `currentTime` 以下である最後のブロック。時刻を持たないブロックは
+ * 対象外として飛ばす。ブロックは時刻順に並んでいる前提。
+ */
+export function blockAtTime(
+  blocks: Block[],
+  currentTime: number,
+  tolerance = 0.05
+): number | null {
+  let found: number | null = null;
+  for (const b of blocks) {
+    if (b.time == null) continue;
+    if (b.time <= currentTime + tolerance) found = b.index;
+    else break;
+  }
+  return found;
 }
 
 /** 1 ブロック分の範囲から話者メンションと本文を取り出す */
@@ -158,10 +201,8 @@ function extractBlock(
   start: number,
   end: number,
   labels: string[],
-  blockIndex: number,
   norm: string[],
-  normOffsets: number[],
-  normBlock: number[]
+  normOffsets: number[]
 ): { speakers: string[]; body: string; mentions: MentionRange[] } {
   const speakers: string[] = [];
   const mentions: MentionRange[] = [];
@@ -189,7 +230,6 @@ function extractBlock(
     if (!isSkippable(ch)) {
       norm.push(ch);
       normOffsets.push(i);
-      normBlock.push(blockIndex);
     }
     i++;
   }

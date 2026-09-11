@@ -1,14 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Project, ProjectWords, UserSettings } from "@/lib/types";
+import type { Project, UserSettings } from "@/lib/types";
 import { parseDoc } from "@/editor/parse";
-import { alignNorm, blockTimes, type BlockTime } from "@/editor/align";
 import { blockSourceKey } from "@/editor/refine";
 import { buildTableHtml, buildTableText, copyTable, type TableRow } from "@/editor/tableHtml";
-import { formatTime } from "@/editor/format";
-
-const EMPTY_TIMES: BlockTime[] = [];
+import { formatBlockTime } from "@/editor/format";
 
 /**
  * 出力画面（③、第7章）。
@@ -19,11 +16,9 @@ const EMPTY_TIMES: BlockTime[] = [];
  */
 export default function ExportApp({
   project,
-  words,
   settings,
 }: {
   project: Project;
-  words: ProjectWords | null;
   settings: UserSettings;
 }) {
   const [includeTime, setIncludeTime] = useState(settings.exportIncludeTime);
@@ -35,12 +30,6 @@ export default function ExportApp({
     () => parseDoc(project.rawText, project.participants),
     [project.rawText, project.participants]
   );
-
-  const times = useMemo(() => {
-    if (!words || words.words.length === 0) return EMPTY_TIMES;
-    const map = alignNorm(doc.norm, words.norm);
-    return blockTimes(doc.blocks.length, doc.normBlock, map, words.normWordIdx, words.words);
-  }, [doc, words]);
 
   const utteranceBlocks = useMemo(
     () => doc.blocks.filter((b) => b.kind === "utterance"),
@@ -57,13 +46,14 @@ export default function ExportApp({
   const rows: TableRow[] = useMemo(
     () =>
       doc.blocks.map((block) => {
-        const time = times[block.index]?.start ?? null;
+        // 時刻は区切り記号に書かれているものをそのまま使う
+        const time = block.time;
         if (block.kind === "heading" || !useRefined) return { block, time };
         // 整文結果が無ければ原文で補う（空セルにはしない）
         const text = project.refinements[blockSourceKey(block)]?.text ?? block.body;
         return { block, time, text };
       }),
-    [doc.blocks, times, useRefined, project.refinements]
+    [doc.blocks, useRefined, project.refinements]
   );
 
   function persistSetting(patch: Partial<UserSettings>) {
@@ -169,7 +159,7 @@ export default function ExportApp({
               }
               return (
                 <tr key={row.block.index}>
-                  {includeTime ? <td className="time">{formatTime(row.time)}</td> : null}
+                  {includeTime ? <td className="time">{formatBlockTime(row.time)}</td> : null}
                   {includeSpeaker ? (
                     <td className="speaker">
                       {row.block.speakers.length > 0 ? (

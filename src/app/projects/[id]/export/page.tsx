@@ -1,8 +1,6 @@
 import { notFound, redirect } from "next/navigation";
-import { kv, keys } from "@/lib/kv";
 import { currentUser } from "@/lib/auth";
 import { loadOwned } from "@/lib/projects";
-import type { ProjectWords } from "@/lib/types";
 import ProjectNav from "@/components/ProjectNav";
 import ExportApp from "@/components/ExportApp";
 
@@ -22,7 +20,6 @@ export default async function ExportPage({
   const { id } = await params;
   const project = await loadOwned(id, user.id);
   if (!project) notFound();
-  const words = await kv.get<ProjectWords>(keys.projectWords(id));
 
   return (
     <div className="screen-page">
@@ -30,7 +27,7 @@ export default async function ExportPage({
         <ProjectNav projectId={project.id} current="export" />
         <span style={{ fontWeight: 600 }}>{project.title}</span>
       </header>
-      <ExportApp project={project} words={words} settings={user.settings} />
+      <ExportApp project={project} settings={user.settings} />
     </div>
   );
 }
