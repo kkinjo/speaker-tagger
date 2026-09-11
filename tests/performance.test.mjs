@@ -31,8 +31,6 @@ export default async function run() {
     r.check("全発言が表になる", stats.rows > 2000, `rows=${stats.rows}`);
     r.check("話者交代のヒントが付く", stats.hints > 100, `hints=${stats.hints}`);
 
-    await page.locator('.pane-header input[type="checkbox"]').first().check();
-    await page.waitForTimeout(1500);
     const times = await page.locator("table.minutes td.time").allTextContents();
     r.log(`時刻 先頭 ${times.slice(0, 3)} 末尾 ${times.slice(-3)}`);
     r.check(

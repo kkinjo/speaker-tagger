@@ -124,9 +124,9 @@ export default async function run() {
       (await page.locator("table.minutes tr.heading-row").count()) === 1
     );
     r.check(
-      "見出しは話者列と発言列をまたぐ",
+      "見出しは時刻・話者・発言の3列をまたぐ",
       (await page.locator("table.minutes tr.heading-row td").getAttribute("colspan")) ===
-        "2"
+        "3"
     );
     r.check(
       "見出しは編集画面でも区別される",
@@ -174,9 +174,8 @@ export default async function run() {
     await page.waitForTimeout(200);
     r.check("Ctrl+Shift+Z でやり直せる", (await ta.inputValue()) === beforeUndo);
 
-    // 時刻
-    await page.locator('.pane-header input[type="checkbox"]').first().check();
-    await page.waitForTimeout(600);
+    // 時刻（常時表示）
+    await page.waitForTimeout(300);
     const timeCells = await page.locator("table.minutes td.time").allTextContents();
     r.check(
       "単語の時刻が各行に割り当たる",

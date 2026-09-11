@@ -37,9 +37,7 @@ export default async function run() {
       `最大リクエスト ${Math.max(0, ...requests)} バイト`
     );
 
-    // 時刻クリックでその位置へ
-    await page.locator('.pane-header input[type="checkbox"]').first().check();
-    await page.waitForTimeout(500);
+    // 時刻クリックでその位置へ（時刻列は常時表示）
     const link = page.locator("table.minutes td.time .time-link").nth(4);
     const label = await link.textContent();
     await link.click();

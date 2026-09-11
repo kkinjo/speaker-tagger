@@ -24,7 +24,6 @@ type RowProps = {
   body: string;
   time: number | null;
   active: boolean;
-  includeTime: boolean;
   hasAudio: boolean;
   onSeek: (sec: number) => void;
   onSelectBlock: (blockIndex: number) => void;
@@ -34,23 +33,13 @@ type RowProps = {
  * 1 行分。1 時間の会議だと数千行になるため、値が変わった行だけ描き直す。
  */
 const Row = memo(function Row(props: RowProps) {
-  const {
-    index,
-    heading,
-    speaker,
-    body,
-    time,
-    active,
-    includeTime,
-    hasAudio,
-    onSeek,
-    onSelectBlock,
-  } = props;
+  const { index, heading, speaker, body, time, active, hasAudio, onSeek, onSelectBlock } =
+    props;
 
   if (heading !== null) {
     return (
       <tr className="heading-row" onClick={() => onSelectBlock(index)}>
-        <td colSpan={includeTime ? 3 : 2}>{heading}</td>
+        <td colSpan={3}>{heading}</td>
       </tr>
     );
   }
@@ -61,24 +50,22 @@ const Row = memo(function Row(props: RowProps) {
 
   return (
     <tr className={classes} onClick={() => onSelectBlock(index)}>
-      {includeTime ? (
-        <td className="time">
-          {hasAudio && time != null ? (
-            <button
-              className="time-link"
-              onClick={(e) => {
-                e.stopPropagation();
-                onSeek(time);
-              }}
-              title="この位置から音声を再生"
-            >
-              {formatTime(time)}
-            </button>
-          ) : (
-            formatTime(time)
-          )}
-        </td>
-      ) : null}
+      <td className="time">
+        {hasAudio && time != null ? (
+          <button
+            className="time-link"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSeek(time);
+            }}
+            title="この位置から音声を再生"
+          >
+            {formatTime(time)}
+          </button>
+        ) : (
+          formatTime(time)
+        )}
+      </td>
       <td className="speaker">
         {speaker ? (
           <>
@@ -103,7 +90,6 @@ export default function TableView({
   onSelectBlock,
   scrollRef,
 }: Props) {
-  const [includeTime, setIncludeTime] = useState(false);
   const [copied, setCopied] = useState("");
 
   const rows = useMemo(
@@ -118,8 +104,8 @@ export default function TableView({
   async function copy() {
     try {
       await copyTable(
-        buildTableHtml(rows, { includeTime }),
-        buildTableText(rows, { includeTime })
+        buildTableHtml(rows, { includeTime: true }),
+        buildTableText(rows, { includeTime: true })
       );
       setCopied("コピーしました（Word に貼ると表になります）");
     } catch {
@@ -132,14 +118,6 @@ export default function TableView({
     <div className="pane">
       <div className="pane-header">
         <span className="pane-title">表形式ビュー</span>
-        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <input
-            type="checkbox"
-            checked={includeTime}
-            onChange={(e) => setIncludeTime(e.target.checked)}
-          />
-          時刻列
-        </label>
         <button className="btn btn-sm" onClick={copy}>
           表をコピー
         </button>
@@ -151,13 +129,13 @@ export default function TableView({
         <table className="minutes">
           {/* 幅を固定しておかないと、長い話者名ひとつで列幅が崩れる */}
           <colgroup>
-            {includeTime ? <col className="col-time" /> : null}
+            <col className="col-time" />
             <col className="col-speaker" />
             <col />
           </colgroup>
           <thead>
             <tr>
-              {includeTime ? <th>時刻</th> : null}
+              <th>時刻</th>
               <th>話者</th>
               <th>発言内容</th>
             </tr>
@@ -165,7 +143,7 @@ export default function TableView({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={includeTime ? 3 : 2} className="muted">
+                <td colSpan={3} className="muted">
                   左側にテキストを入力すると、ここに表が表示されます。
                 </td>
               </tr>
@@ -179,7 +157,6 @@ export default function TableView({
                 body={block.body}
                 time={time}
                 active={block.index === activeBlock}
-                includeTime={includeTime}
                 hasAudio={hasAudio}
                 onSeek={onSeek}
                 onSelectBlock={onSelectBlock}
