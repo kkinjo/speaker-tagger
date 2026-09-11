@@ -524,9 +524,12 @@ export default function EditorApp({
     };
 
     const onKey = (e: KeyboardEvent) => {
-      // 入力欄の外なら Space だけで再生/一時停止できる
+      // 入力欄の外なら Space だけで再生/一時停止できる。
+      // 入力欄の中では Shift+Space（Ctrl+Space は Windows/macOS で
+      // 入力ソース切り替え等の OS 標準ショートカットに割り当てられて
+      // いることが多く、ブラウザまでイベントが届かないため使わない）
       if (e.code === "Space" && !e.altKey && !e.metaKey) {
-        if (e.ctrlKey || !isTextField(e.target)) {
+        if (e.shiftKey || !isTextField(e.target)) {
           e.preventDefault();
           togglePlay();
           return;

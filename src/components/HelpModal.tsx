@@ -12,7 +12,7 @@ type Props = {
  * 画面上に専用のボタン/表示があるため、ここには含めない。
  */
 const SHORTCUTS: [string, string][] = [
-  ["再生 / 一時停止", "Space（編集中は Ctrl+Space）"],
+  ["再生 / 一時停止", "Space（編集中は Shift+Space）"],
   ["3秒 戻す / 進める", "Alt+←/→"],
   ["再生速度", "Alt+↑/↓"],
   ["未割り当ての次へ", "Alt+J"],

@@ -93,7 +93,7 @@ export default async function run() {
       ) < 0.001
     );
 
-    // 編集中は Space が空白入力になる（Ctrl+Space なら再生）
+    // 編集中は Space が空白入力になる（Shift+Space なら再生）
     await page.locator("textarea.editor-input").click();
     const textBefore = await page.locator("textarea.editor-input").inputValue();
     await page.keyboard.press("Space");
@@ -107,13 +107,13 @@ export default async function run() {
       "そのとき再生は始まらない",
       await page.evaluate(() => document.querySelector("audio").paused)
     );
-    await page.keyboard.press("Control+Space");
+    await page.keyboard.press("Shift+Space");
     await page.waitForTimeout(400);
     r.check(
-      "編集中でも Ctrl+Space なら再生できる",
+      "編集中でも Shift+Space なら再生できる",
       await page.evaluate(() => !document.querySelector("audio").paused)
     );
-    await page.keyboard.press("Control+Space");
+    await page.keyboard.press("Shift+Space");
 
     await page.reload();
     await page.waitForSelector("audio", { state: "attached", timeout: 8000 });

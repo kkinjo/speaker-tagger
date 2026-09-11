@@ -57,7 +57,7 @@ export default function AudioBar(props: Props) {
       <button
         className="btn btn-sm btn-primary"
         onClick={props.onToggle}
-        title="再生 / 一時停止（Space）"
+        title="再生 / 一時停止（Space。編集中は Shift+Space）"
         style={{ minWidth: 84, justifyContent: "center" }}
       >
         {props.playing ? "⏸ 一時停止" : "▶ 再生"}
