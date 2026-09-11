@@ -81,7 +81,7 @@ export function splitLines(raw: string): LineInfo[] {
  * - `@所属/氏名` は事前登録済み参加者との一致で話者として解釈する
  */
 export function parseDoc(raw: string, participants: Participant[]): ParsedDoc {
-  // 長いラベルから試すことで「宮崎小/河野」と「河野」の取り違えを防ぐ
+  // 長いラベルから試すことで「●●小/太田」と「太田」の取り違えを防ぐ
   const labels = participants
     .map(participantLabel)
     .filter((l) => l.length > 0)

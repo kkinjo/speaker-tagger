@@ -17,7 +17,7 @@ await importJson(page, files.sample);
 await page.getByRole("button", { name: "まとめて貼り付け" }).click();
 await page
   .locator("textarea[placeholder^='1行に1人']")
-  .fill("宮崎小/河野\n県教委/山田\n宮崎小/田中");
+  .fill("●●小/太田\n県教委/山田\n●●小/田中");
 await page.getByRole("button", { name: "この内容で追加" }).click();
 await page.screenshot({ path: `${out}/03-setup.png` });
 
@@ -32,7 +32,7 @@ await page.evaluate(() => {
   document.execCommand(
     "insertText",
     false,
-    "# 議題1 開会について\n@宮崎小/河野 "
+    "# 議題1 開会について\n@●●小/太田 "
   );
 });
 await page.waitForTimeout(500);

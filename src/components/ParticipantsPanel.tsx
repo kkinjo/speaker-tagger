@@ -12,7 +12,7 @@ function newParticipantId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-/** 「宮崎小/河野」「宮崎小 河野」「宮崎小　河野」をまとめて取り込む */
+/** 「●●小/太田」「●●小 太田」「●●小　太田」をまとめて取り込む */
 function parseBulk(text: string): Participant[] {
   return text
     .split(/\r?\n/)
@@ -61,7 +61,7 @@ export default function ParticipantsPanel({ participants, onChange }: Props) {
             value={bulk}
             onChange={(e) => setBulk(e.target.value)}
             rows={5}
-            placeholder={"1行に1人。例）\n宮崎小/河野\n県教委/山田\n宮崎小 田中"}
+            placeholder={"1行に1人。例）\n●●小/太田\n県教委/山田\n●●小 田中"}
             style={{
               width: "100%",
               fontFamily: "inherit",

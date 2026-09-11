@@ -15,9 +15,9 @@ export type Word = {
 /** 事前登録する会議参加者。所属＋氏名で一意に扱う */
 export type Participant = {
   id: string;
-  /** 所属 (例: 宮崎小) */
+  /** 所属 (例: ●●小) */
   org: string;
-  /** 氏名 (例: 河野) */
+  /** 氏名 (例: 太田) */
   name: string;
 };
 
