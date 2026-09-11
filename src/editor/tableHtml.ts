@@ -4,22 +4,37 @@ import { formatTime } from "./format";
 export type TableRow = {
   block: Block;
   time: number | null;
+  /**
+   * 発言内容として表示する文字列の上書き。
+   * 未指定なら `block.body`（原文）を使う。
+   * 出力画面（③）が「整文後」を選んだときに、整文結果（無ければ原文）を
+   * ここへ入れて渡す。tableHtml.ts 自体は整文結果の解決方法を知らない。
+   */
+  text?: string;
+};
+
+export type TableOptions = {
+  includeTime: boolean;
+  /** 既定 true。出力画面（③）で「話者列を含めない」を選んだときに false にする */
+  includeSpeaker?: boolean;
 };
 
 const TAB = "\t";
+
+function bodyOf(row: TableRow): string {
+  return row.text ?? row.block.body;
+}
 
 /**
  * Word に貼ったときに表として認識される HTML を作る。
  * Word はスタイルシートを参照しないため、罫線などは全てインラインで指定する。
  */
-export function buildTableHtml(
-  rows: TableRow[],
-  options: { includeTime: boolean }
-): string {
+export function buildTableHtml(rows: TableRow[], options: TableOptions): string {
+  const includeSpeaker = options.includeSpeaker ?? true;
   const cell =
     "border:1px solid #000000;padding:4px 6px;vertical-align:top;font-family:'Yu Gothic','Meiryo',sans-serif;font-size:10.5pt;";
   const head = `${cell}background-color:#efefef;font-weight:bold;`;
-  const colCount = options.includeTime ? 3 : 2;
+  const colCount = (options.includeTime ? 1 : 0) + (includeSpeaker ? 1 : 0) + 1;
 
   const parts: string[] = [];
   parts.push(
@@ -27,7 +42,7 @@ export function buildTableHtml(
   );
   parts.push("<thead><tr>");
   if (options.includeTime) parts.push(`<th style="${head}width:8%;">時刻</th>`);
-  parts.push(`<th style="${head}width:20%;">話者</th>`);
+  if (includeSpeaker) parts.push(`<th style="${head}width:20%;">話者</th>`);
   parts.push(`<th style="${head}">発言内容</th>`);
   parts.push("</tr></thead><tbody>");
 
@@ -44,13 +59,13 @@ export function buildTableHtml(
     if (options.includeTime) {
       parts.push(`<td style="${cell}">${formatTime(row.time)}</td>`);
     }
-    parts.push(
-      `<td style="${cell}">${escapeHtml(row.block.speakers.join(" / "))}</td>`
-    );
+    if (includeSpeaker) {
+      parts.push(
+        `<td style="${cell}">${escapeHtml(row.block.speakers.join(" / "))}</td>`
+      );
+    }
     // セル内の改行は <br> にして、箇条書きなど意味のある行分けを保つ
-    parts.push(
-      `<td style="${cell}">${escapeHtml(row.block.body).replace(/\n/g, "<br>")}</td>`
-    );
+    parts.push(`<td style="${cell}">${escapeHtml(bodyOf(row)).replace(/\n/g, "<br>")}</td>`);
     parts.push("</tr>");
   }
 
@@ -59,28 +74,32 @@ export function buildTableHtml(
 }
 
 /** HTML を受け付けない貼り付け先向けのタブ区切り版 */
-export function buildTableText(
-  rows: TableRow[],
-  options: { includeTime: boolean }
-): string {
+export function buildTableText(rows: TableRow[], options: TableOptions): string {
+  const includeSpeaker = options.includeSpeaker ?? true;
   const lines: string[] = [];
   lines.push(
-    [...(options.includeTime ? ["時刻"] : []), "話者", "発言内容"].join(TAB)
+    [
+      ...(options.includeTime ? ["時刻"] : []),
+      ...(includeSpeaker ? ["話者"] : []),
+      "発言内容",
+    ].join(TAB)
   );
   for (const row of rows) {
     if (row.block.kind === "heading") {
       lines.push(
-        [...(options.includeTime ? [""] : []), "", `【${row.block.heading}】`].join(
-          TAB
-        )
+        [
+          ...(options.includeTime ? [""] : []),
+          ...(includeSpeaker ? [""] : []),
+          `【${row.block.heading}】`,
+        ].join(TAB)
       );
       continue;
     }
     lines.push(
       [
         ...(options.includeTime ? [formatTime(row.time)] : []),
-        row.block.speakers.join(" / "),
-        row.block.body.replace(/\n/g, " "),
+        ...(includeSpeaker ? [row.block.speakers.join(" / ")] : []),
+        bodyOf(row).replace(/\n/g, " "),
       ].join(TAB)
     );
   }

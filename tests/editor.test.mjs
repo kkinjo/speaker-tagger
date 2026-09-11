@@ -236,24 +236,9 @@ export default async function run() {
     );
     r.check("自動保存され「保存済み」になる", true);
 
-    // Word 向けのコピー
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.getByRole("button", { name: "表をコピー" }).click();
-    await page.waitForTimeout(400);
-    const clipHtml = await page.evaluate(async () => {
-      for (const item of await navigator.clipboard.read()) {
-        if (item.types.includes("text/html")) {
-          return await (await item.getType("text/html")).text();
-        }
-      }
-      return "";
-    });
-    r.check("クリップボードが表になっている", clipHtml.includes("<table"));
-    r.check("罫線がインラインで入る（Word 向け）", clipHtml.includes("border:1px solid"));
-    r.check("セル内の改行が保たれる", clipHtml.includes("<br>"));
     r.check(
-      "見出しは行をまたぐ",
-      clipHtml.includes('colspan="3"') || clipHtml.includes('colspan="2"')
+      "①の表形式ビューに「表をコピー」ボタンは無い（③に一本化。第7章 7.4）",
+      (await page.getByRole("button", { name: "表をコピー" }).count()) === 0
     );
 
     // 再読み込み後も残る

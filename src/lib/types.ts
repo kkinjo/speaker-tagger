@@ -30,6 +30,11 @@ export type UserSettings = {
   followPlayback: boolean;
   /** 左右のペインのスクロールを連動させるか */
   syncScroll: boolean;
+  /** 出力画面（③）の表示オプション。第7章 7.2 */
+  exportIncludeTime: boolean;
+  exportIncludeSpeaker: boolean;
+  /** true: 整文後のテキストを使う（無ければ原文で補う） / false: 原文 */
+  exportUseRefined: boolean;
 };
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -38,6 +43,9 @@ export const DEFAULT_SETTINGS: UserSettings = {
   playbackRate: 1,
   followPlayback: true,
   syncScroll: true,
+  exportIncludeTime: false,
+  exportIncludeSpeaker: true,
+  exportUseRefined: true,
 };
 
 export type User = {

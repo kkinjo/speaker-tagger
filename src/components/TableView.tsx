@@ -1,10 +1,9 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import type { ParsedDoc } from "@/editor/parse";
 import type { BlockTime } from "@/editor/align";
 import { formatTime } from "@/editor/format";
-import { buildTableHtml, buildTableText, copyTable } from "@/editor/tableHtml";
 
 type Props = {
   doc: ParsedDoc;
@@ -81,6 +80,13 @@ const Row = memo(function Row(props: RowProps) {
   );
 });
 
+/**
+ * 話者整理画面（①）右側の表形式ビュー。
+ *
+ * 話者割り当ての確認用の位置づけ（第7章 7.4）。Word 用のコピーは
+ * 出力画面（③、ExportApp.tsx）に一本化されているため、ここにはコピー
+ * 機能を持たない。
+ */
 export default function TableView({
   doc,
   times,
@@ -90,8 +96,6 @@ export default function TableView({
   onSelectBlock,
   scrollRef,
 }: Props) {
-  const [copied, setCopied] = useState("");
-
   const rows = useMemo(
     () =>
       doc.blocks.map((block) => ({
@@ -101,28 +105,13 @@ export default function TableView({
     [doc.blocks, times]
   );
 
-  async function copy() {
-    try {
-      await copyTable(
-        buildTableHtml(rows, { includeTime: true }),
-        buildTableText(rows, { includeTime: true })
-      );
-      setCopied("コピーしました（Word に貼ると表になります）");
-    } catch {
-      setCopied("コピーできませんでした。表を選択して Ctrl+C をお試しください。");
-    }
-    setTimeout(() => setCopied(""), 4000);
-  }
-
   return (
     <div className="pane">
       <div className="pane-header">
         <span className="pane-title">表形式ビュー</span>
-        <button className="btn btn-sm" onClick={copy}>
-          表をコピー
-        </button>
-        <div className="spacer" />
-        {copied ? <span className="muted">{copied}</span> : null}
+        <span className="muted" style={{ fontSize: 12 }}>
+          話者割り当ての確認用です。コピーは③出力画面から行ってください。
+        </span>
       </div>
 
       <div className="table-scroll" ref={scrollRef}>

@@ -23,7 +23,7 @@ export default async function RefinePage({
   if (!project) notFound();
 
   return (
-    <div className="refine-page">
+    <div className="screen-page">
       <header className="topbar">
         <ProjectNav projectId={project.id} current="refine" />
         <span style={{ fontWeight: 600 }}>{project.title}</span>

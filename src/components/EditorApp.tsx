@@ -208,6 +208,11 @@ export default function EditorApp({
     playbackRate: rate,
     followPlayback: follow,
     syncScroll,
+    // 出力画面（③）専用の設定。①では変更しないので、初期値をそのまま送り返す
+    // （settings は prop なのでマウント中は不変）
+    exportIncludeTime: settings.exportIncludeTime,
+    exportIncludeSpeaker: settings.exportIncludeSpeaker,
+    exportUseRefined: settings.exportUseRefined,
   };
 
   const saveSettings = useCallback((keepalive: boolean) => {
@@ -786,7 +791,7 @@ export default function EditorApp({
               <span className="num">4</span>
               <span>
                 左側で <kbd>@</kbd> 話者、<kbd>--</kbd> 区切り、<kbd>#</kbd>{" "}
-                議題見出しを付けていく。右側の表ができたら「表をコピー」で Word へ。
+                議題見出しを付けていく。Word へのコピーは、上部の「出力」画面から行います。
               </span>
             </li>
           </ol>

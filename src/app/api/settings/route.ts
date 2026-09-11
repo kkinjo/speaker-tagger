@@ -27,6 +27,15 @@ export async function PATCH(req: Request) {
   if (typeof patch.syncScroll === "boolean") {
     next.syncScroll = patch.syncScroll;
   }
+  if (typeof patch.exportIncludeTime === "boolean") {
+    next.exportIncludeTime = patch.exportIncludeTime;
+  }
+  if (typeof patch.exportIncludeSpeaker === "boolean") {
+    next.exportIncludeSpeaker = patch.exportIncludeSpeaker;
+  }
+  if (typeof patch.exportUseRefined === "boolean") {
+    next.exportUseRefined = patch.exportUseRefined;
+  }
 
   await kv.set(keys.user(user.id), { ...user, settings: next });
   return NextResponse.json({ settings: next });

@@ -868,21 +868,25 @@ table.minutes tr.row-done td.speaker {
   font-size: 11px;
 }
 
-/* ---------- 整文画面（RefineApp） ---------- */
+/* ---------- 整文画面（②RefineApp）・出力画面（③ExportApp）共通 ---------- */
 
-.refine-page {
+/* トップバー＋本体を画面いっぱいに収め、本体側だけが内部でスクロールする */
+.screen-page {
   display: flex;
   flex-direction: column;
   height: 100vh;
   min-height: 0;
 }
 
-.refine-app {
+.refine-app,
+.export-app {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
 }
+
+/* ---------- 整文画面（RefineApp） ---------- */
 
 .refine-toolbar {
   display: flex;
@@ -1012,4 +1016,35 @@ table.refine-table thead th {
 
 .refine-output textarea::placeholder {
   color: var(--fg-muted);
+}
+
+/* ---------- 出力画面（ExportApp） ---------- */
+
+.export-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.export-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.export-table-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  padding: 0 16px 16px;
+}
+
+.export-table-scroll table.minutes {
+  table-layout: fixed;
 }
