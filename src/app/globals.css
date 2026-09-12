@@ -666,22 +666,25 @@ table.minutes tr.row-todo td.speaker {
   white-space: nowrap;
 }
 
-.participant-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 8px;
+/* 参加者は1行1人のテキストエリア1つで管理する。
+   入力欄を人数分並べると30名で縦に伸びてドロワーが使えなくなるため、
+   高さは10行分で固定し、超えた分は中でスクロールさせる */
+.participant-text {
+  width: 100%;
   margin-top: 10px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--fg);
+  overflow-y: auto;
+  resize: vertical;
 }
 
-.participant-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.participant-row input {
-  min-width: 0;
-  flex: 1;
+.participant-note {
+  margin: 6px 0 0;
 }
 
 .hint-note {

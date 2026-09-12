@@ -25,15 +25,22 @@ export default async function run() {
       (rawText.match(/^--@\d+(\.\d+)?$/gm) ?? []).length >= 5
     );
 
-    // 参加者の登録
-    await page.getByRole("button", { name: "まとめて貼り付け" }).click();
-    await page
-      .locator("textarea[placeholder^='1行に1人']")
-      .fill("●●小/太田\n県教委/山田\n●●小/田中");
-    await page.getByRole("button", { name: "この内容で追加" }).click();
+    // 参加者の登録（1行1人のテキストエリア。フォーカスを外した時点で確定する）
+    const partsTa = page.locator("textarea.participant-text");
+    await partsTa.fill("●●小/太田\n県教委/山田\n●●小/田中");
     r.check(
-      "参加者が3名登録される",
-      (await page.locator(".participant-row").count()) === 3
+      "入力中はまだ確定しない",
+      ((await page.locator(".participant-note").first().textContent()) ?? "").includes(
+        "0名"
+      )
+    );
+    await partsTa.blur();
+    await page.waitForTimeout(200);
+    r.check(
+      "フォーカスを外すと3名登録される",
+      ((await page.locator(".participant-note").first().textContent()) ?? "").includes(
+        "3名"
+      )
     );
     await page.getByRole("button", { name: "設定を閉じる" }).click();
 
@@ -261,6 +268,50 @@ export default async function run() {
       (await page.evaluate(
         () => getComputedStyle(document.querySelector("textarea.editor-input")).fontSize
       )) === sizeAfter
+    );
+
+    // 保存済みの参加者がテキストエリアへ展開される
+    await page.getByRole("button", { name: "取り込み・参加者" }).click();
+    const reopened = page.locator("textarea.participant-text");
+    r.check(
+      "既存の参加者が1行1人でテキストエリアに展開される",
+      (await reopened.inputValue()) === "●●小/太田\n県教委/山田\n●●小/田中",
+      JSON.stringify(await reopened.inputValue())
+    );
+    r.check(
+      "登録済みの件数が出る",
+      ((await page.locator(".participant-note").first().textContent()) ?? "").includes(
+        "3名"
+      )
+    );
+
+    // 行を消すと参加者も消える
+    await reopened.fill("●●小/太田\n県教委/山田");
+    await reopened.blur();
+    await page.waitForTimeout(200);
+    r.check(
+      "行を消すとその参加者も消える",
+      ((await page.locator(".participant-note").first().textContent()) ?? "").includes(
+        "2名"
+      )
+    );
+    await page.locator("textarea.editor-input").click();
+    await page.keyboard.press("Control+Home");
+    await page.keyboard.type("@");
+    await page.waitForSelector(".suggest");
+    r.check(
+      "消した参加者は @ の候補にも出なくなる",
+      (await page.locator(".suggest-item").allTextContents()).every(
+        (t) => !t.includes("田中")
+      )
+    );
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Backspace");
+
+    r.check(
+      "廃止したボタンが残っていない",
+      (await page.getByRole("button", { name: "＋ 1人追加" }).count()) === 0 &&
+        (await page.locator(".participant-row").count()) === 0
     );
   } finally {
     await browser.close();

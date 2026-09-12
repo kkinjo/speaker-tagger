@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Participant } from "@/lib/types";
+import { participantLabel } from "@/editor/parse";
 
 type Props = {
   participants: Participant[];
@@ -26,12 +27,61 @@ function parseBulk(text: string): Participant[] {
     });
 }
 
-export default function ParticipantsPanel({ participants, onChange }: Props) {
-  const [bulk, setBulk] = useState("");
-  const [bulkOpen, setBulkOpen] = useState(false);
+/** 参加者リストをテキストへ戻す。parseBulk で読み直すと同じ並びになる */
+function toText(participants: Participant[]): string {
+  return participants
+    .map((p) => (p.org ? `${p.org}/${p.name}` : p.name))
+    .join("\n");
+}
 
-  function update(id: string, patch: Partial<Participant>) {
-    onChange(participants.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+/**
+ * 解析し直した参加者に、元の id を引き継がせる。
+ *
+ * 直近に使った話者の順（`Project.mru`）は participant の id で紐づいているため、
+ * 毎回新しい id を振ると、テキストを触るたびに候補の並びが初期化されてしまう。
+ * 所属・氏名が変わっていない人はそのまま同じ人とみなす。
+ * 同姓同所属が複数いる場合は、上から順に1つずつ割り当てる。
+ */
+function keepIds(parsed: Participant[], previous: Participant[]): Participant[] {
+  const byLabel = new Map<string, string[]>();
+  for (const p of previous) {
+    const label = participantLabel(p);
+    const ids = byLabel.get(label);
+    if (ids) ids.push(p.id);
+    else byLabel.set(label, [p.id]);
+  }
+  return parsed.map((p) => {
+    const id = byLabel.get(participantLabel(p))?.shift();
+    return id ? { ...p, id } : p;
+  });
+}
+
+function same(a: Participant[], b: Participant[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((p, i) => p.id === b[i].id && p.org === b[i].org && p.name === b[i].name)
+  );
+}
+
+/**
+ * 参加者の登録。1行1人のテキストエリア1つで、追加も修正も削除も行う。
+ *
+ * 個別の入力欄を人数分並べる作りだと、30名で縦に伸びてドロワーが
+ * 使い物にならなくなる。高さを10行分で固定し、超えた分は中でスクロールさせる。
+ */
+export default function ParticipantsPanel({ participants, onChange }: Props) {
+  const [text, setText] = useState(() => toText(participants));
+
+  /**
+   * 入力のたびに解析すると、打ちかけの文字列で参加者が登録されてしまう。
+   * フォーカスが外れた時点で確定する。
+   *
+   * テキストは整形し直さない（「●●小 太田」と打ったものを
+   * 「●●小/太田」に書き換えない）。打ったとおりが残るほうが予測しやすい。
+   */
+  function commit() {
+    const next = keepIds(parseBulk(text), participants);
+    if (!same(next, participants)) onChange(next);
   }
 
   return (
@@ -41,87 +91,24 @@ export default function ParticipantsPanel({ participants, onChange }: Props) {
         <span className="hint-note">
           ここに登録した人だけが <kbd>@</kbd> の候補に出ます（所属＋氏名で区別）。
         </span>
-        <div className="spacer" />
-        <button
-          className="btn btn-sm"
-          onClick={() =>
-            onChange([...participants, { id: newParticipantId(), org: "", name: "" }])
-          }
-        >
-          ＋ 1人追加
-        </button>
-        <button className="btn btn-sm" onClick={() => setBulkOpen((v) => !v)}>
-          まとめて貼り付け
-        </button>
       </div>
 
-      {bulkOpen ? (
-        <div style={{ marginTop: 10 }}>
-          <textarea
-            value={bulk}
-            onChange={(e) => setBulk(e.target.value)}
-            rows={5}
-            placeholder={"1行に1人。例）\n●●小/太田\n県教委/山田\n●●小 田中"}
-            style={{
-              width: "100%",
-              fontFamily: "inherit",
-              fontSize: 13,
-              padding: 8,
-              border: "1px solid var(--border-strong)",
-              borderRadius: 8,
-            }}
-          />
-          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            <button
-              className="btn btn-sm btn-primary"
-              onClick={() => {
-                const added = parseBulk(bulk);
-                if (added.length > 0) onChange([...participants, ...added]);
-                setBulk("");
-                setBulkOpen(false);
-              }}
-            >
-              この内容で追加
-            </button>
-            <button className="btn btn-sm" onClick={() => setBulkOpen(false)}>
-              閉じる
-            </button>
-          </div>
-        </div>
-      ) : null}
+      <textarea
+        className="participant-text"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        rows={10}
+        placeholder={"1行に1人。例）\n●●小/太田\n県教委/山田\n●●小 田中"}
+        aria-label="参加者（1行に1人）"
+      />
 
-      {participants.length === 0 ? (
-        <p className="hint-note" style={{ margin: "10px 0 0" }}>
-          まだ登録がありません。「＋ 1人追加」または「まとめて貼り付け」から登録してください。
-        </p>
-      ) : (
-        <div className="participant-grid">
-          {participants.map((p) => (
-            <div className="participant-row" key={p.id}>
-              <input
-                type="text"
-                value={p.org}
-                placeholder="所属"
-                onChange={(e) => update(p.id, { org: e.target.value })}
-              />
-              <span className="muted">/</span>
-              <input
-                type="text"
-                value={p.name}
-                placeholder="氏名"
-                onChange={(e) => update(p.id, { name: e.target.value })}
-              />
-              <button
-                className="btn btn-sm btn-danger"
-                title="削除"
-                onClick={() => onChange(participants.filter((x) => x.id !== p.id))}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <p className="hint-note participant-note">
+        <strong>{participants.length}</strong>名 登録済み
+      </p>
+      <p className="hint-note participant-note">
+        所属・氏名を変更すると、既にその人に割り当てた <kbd>@</kbd> は外れます。
+      </p>
     </div>
   );
 }
