@@ -1,6 +1,9 @@
 :root {
   --bg: #f4f5f7;
   --panel: #ffffff;
+  /* ツールバー2段目。--bg と同じ色相のまま一段だけ暗くしたもの。
+     色相を変えると「保存済み」バッジや未割り当て件数の色が埋もれる */
+  --panel-sub: #eef0f4;
   --border: #d8dbe0;
   --border-strong: #b9bec7;
   --fg: #1c1f24;
@@ -188,6 +191,18 @@ textarea:focus {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
+}
+
+/* 話者整理画面（①）のツールバーは2段構成。
+   1段目＝どこを開いているかの識別と画面の行き来、
+   2段目＝この画面の作業状態と表示の制御。
+   段の区別は背景の濃淡だけで付ける（境界線は2段目の下に1本だけ引く） */
+.topbar-main {
+  border-bottom: 0;
+}
+
+.topbar-sub {
+  background: var(--panel-sub);
 }
 
 .topbar h1 {

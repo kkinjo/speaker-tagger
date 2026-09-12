@@ -20,11 +20,6 @@ export default async function ProjectPage({
   const data = await kv.get<ProjectWords>(keys.projectWords(id));
 
   return (
-    <EditorApp
-      project={project}
-      words={data}
-      settings={user.settings}
-      username={user.username}
-    />
+    <EditorApp project={project} words={data} settings={user.settings} />
   );
 }

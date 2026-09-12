@@ -35,12 +35,10 @@ export default function EditorApp({
   project,
   words,
   settings,
-  username,
 }: {
   project: Project;
   words: ProjectWords | null;
   settings: UserSettings;
-  username: string;
 }) {
   /* ---- 保存対象の状態 ---- */
   const [title, setTitle] = useState(project.title);
@@ -658,7 +656,8 @@ export default function EditorApp({
       className="editor-app"
       style={{ ["--editor-size" as string]: `${fontSize}px` } as React.CSSProperties}
     >
-      <header className="topbar">
+      {/* 1段目：どこを開いているかの識別と、画面の行き来 */}
+      <header className="topbar topbar-main">
         <ProjectNav projectId={project.id} current="editor" />
         <input
           type="text"
@@ -667,6 +666,21 @@ export default function EditorApp({
           style={{ fontWeight: 600, minWidth: 180 }}
           aria-label="議事録のタイトル"
         />
+        <div className="spacer" />
+        <button
+          className={`btn btn-sm${drawerOpen ? " btn-on" : ""}`}
+          onClick={() => setDrawerOpen((v) => !v)}
+          aria-pressed={drawerOpen}
+        >
+          {drawerOpen ? "設定を閉じる" : "取り込み・参加者"}
+        </button>
+        <button className="btn btn-sm" onClick={() => setHelpOpen(true)}>
+          使い方
+        </button>
+      </header>
+
+      {/* 2段目：この画面の作業状態と表示の制御 */}
+      <div className="topbar topbar-sub">
         <span
           className={`save-state ${
             saveState === "saved"
@@ -751,21 +765,7 @@ export default function EditorApp({
           />
           <span style={{ width: 28 }}>{fontSize}px</span>
         </label>
-
-        <button
-          className={`btn btn-sm${drawerOpen ? " btn-on" : ""}`}
-          onClick={() => setDrawerOpen((v) => !v)}
-          aria-pressed={drawerOpen}
-        >
-          {drawerOpen ? "設定を閉じる" : "取り込み・参加者"}
-        </button>
-        <button className="btn btn-sm" onClick={() => setHelpOpen(true)}>
-          使い方
-        </button>
-        <span className="muted" style={{ fontSize: 12 }}>
-          {username}
-        </span>
-      </header>
+      </div>
 
       {helpOpen ? <HelpModal onClose={() => setHelpOpen(false)} /> : null}
 
