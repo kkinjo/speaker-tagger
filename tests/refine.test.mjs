@@ -53,33 +53,112 @@ export default async function run() {
       /0\s*\/\s*9/.test((await page.locator(".refine-progress").textContent()) ?? "")
     );
     r.check(
-      "未変換行の3列目は空（プレースホルダーのみ）",
-      (await page.locator("table.refine-table textarea").first().inputValue()) === ""
+      "整文結果が無い行の3列目には原文が薄く出る（textarea ではない。第4章 4.1）",
+      (await page.locator("table.refine-table .refine-out-original").count()) === 9 &&
+        (await page.locator("table.refine-table textarea").count()) === 0
     );
     r.check(
-      "未変換行は状態ドットが未変換色（done/edited/error のどれでもない）",
+      "3列目の下段に出るのは1列目と同じ原文",
+      (await page.locator("table.refine-table .refine-out-original").first().textContent()) ===
+        (await page.locator("table.refine-table .refine-body").first().textContent())
+    );
+    r.check(
+      "3列目の上段に話者が出る（1列目と重複するが省略しない。第4章 4.1）",
+      (await page.locator("table.refine-table .refine-out-speaker").count()) === 9
+    );
+    r.check(
+      "ステータスは「原文のまま出力」と文字で出る（第3章 3.3）",
+      (await page
+        .locator("table.refine-table tbody tr:not(.refine-heading-row) .refine-status")
+        .first()
+        .textContent()) === "原文のまま出力"
+    );
+    r.check(
+      "未変換行のステータスは未変換色（done/edited/error のどれでもない）",
       (await page
         .locator("table.refine-table tbody tr:not(.refine-heading-row) .refine-status")
         .first()
         .getAttribute("class")) === "refine-status refine-status-empty"
     );
 
-    // --- 一括変換：3列目にダミー文字列が入り、全行が変換済みになる ---
+    /* --- 表示の絞り込み（第4章 4.2） --- */
+    await page.getByLabel("表示の絞り込み").selectOption("raw");
+    await page.waitForTimeout(200);
+    r.check(
+      "絞り込むと「原文のまま出力」の行だけになる（見出し行も隠れる）",
+      (await page.locator("table.refine-table tbody tr").count()) === 9 &&
+        (await page.locator("tr.refine-heading-row").count()) === 0
+    );
+
+    /* --- 原文のまま確定する（第4章 4.6）。何も直さずフォーカスを外すだけ --- */
+    await page.locator("table.refine-table .refine-out-original").first().click();
+    r.check(
+      "クリックすると原文が入った textarea に変わる",
+      (await page.locator("table.refine-table textarea").first().inputValue()) ===
+        (await page.locator("table.refine-table .refine-body").first().textContent())
+    );
+    await page.locator(".refine-toolbar").click();
+    await page.waitForTimeout(300);
+    r.check(
+      "原文のまま確定した行は絞り込みから外れる（残作業の確認が成立する）",
+      (await page.locator("table.refine-table tbody tr").count()) === 8
+    );
+
+    await page.getByLabel("表示の絞り込み").selectOption("all");
+    await page.waitForTimeout(200);
+    r.check(
+      "絞り込みを解除すると全行に戻る",
+      (await page.locator("table.refine-table tbody tr").count()) === 10
+    );
+    r.check(
+      "何も直さずフォーカスを外すだけで「手修正済み」になる（第4章 4.6）",
+      (await page.locator(".refine-status-edited").count()) === 1
+    );
+    r.check(
+      "原文のまま確定した行の本文は原文と同じ",
+      (await page.locator("table.refine-table textarea").first().inputValue()) ===
+        (await page.locator("table.refine-table .refine-body").first().textContent())
+    );
+
+    // 確定した内容の保存を待ってから先へ進む
+    await page.waitForFunction(
+      () => document.querySelector(".save-state")?.textContent?.includes("保存済み"),
+      null,
+      { timeout: 6000 }
+    );
+
+    // --- 一括変換：3列目にダミー文字列が入る ---
+    // 1行は上で「原文のまま確定」したので、一括変換の対象は残り8行
     await page.getByRole("button", { name: "一括変換" }).click();
     await page.waitForFunction(
-      () => document.querySelectorAll(".refine-status-done").length >= 9,
+      () => document.querySelectorAll(".refine-status-done").length >= 8,
       null,
       { timeout: 15000 }
     );
     r.check(
-      "一括変換で全9行が変換済み（青）になる",
-      (await page.locator(".refine-status-done").count()) === 9
+      "一括変換は未処理の8行だけを変換する（原文のまま確定した行はそのまま）",
+      (await page.locator(".refine-status-done").count()) === 8 &&
+        (await page.locator(".refine-status-edited").count()) === 1
     );
-    const firstText = await page.locator("table.refine-table textarea").first().inputValue();
+    const firstText = await page
+      .locator("table.refine-table textarea")
+      .nth(1)
+      .inputValue();
     r.check("3列目にダミー文字列が入る", firstText.endsWith("(ダミー整文)"), firstText);
     r.check(
       "進捗表示が 9/9 になる",
       /9\s*\/\s*9/.test((await page.locator(".refine-progress").textContent()) ?? "")
+    );
+    r.check(
+      "絞り込むと0行になり、処理漏れが無いことを確認できる（第4章 4.2）",
+      await (async () => {
+        await page.getByLabel("表示の絞り込み").selectOption("raw");
+        await page.waitForTimeout(200);
+        const text = (await page.locator("table.refine-table tbody").textContent()) ?? "";
+        await page.getByLabel("表示の絞り込み").selectOption("all");
+        await page.waitForTimeout(200);
+        return text.includes("処理漏れはありません");
+      })()
     );
 
     // --- 既定では変換済みの行を再処理しない ---
@@ -87,7 +166,7 @@ export default async function run() {
     await page.waitForTimeout(500);
     r.check(
       "既定の一括変換は変換済みの行をやり直さない",
-      (await page.locator("table.refine-table textarea").first().inputValue()) === firstText
+      (await page.locator("table.refine-table textarea").nth(1).inputValue()) === firstText
     );
 
     // --- 手で編集すると「手動修正済み」（緑）になる ---
@@ -96,8 +175,9 @@ export default async function run() {
     await secondTextarea.fill("手で直したテキスト");
     await page.waitForTimeout(300);
     r.check(
-      "手動編集した行は緑（手動修正済み）になる",
-      (await row2.locator(".refine-status-edited").count()) === 1
+      "手動編集した行は緑（手修正済み）になる",
+      (await row2.locator(".refine-status-edited").count()) === 1 &&
+        (await row2.locator(".refine-status").textContent()) === "手修正済み"
     );
 
     // 2秒デバウンス後に保存される（第4章 4.4）
@@ -131,8 +211,9 @@ export default async function run() {
       (await secondTextarea.inputValue()).endsWith("(ダミー整文)")
     );
     r.check(
-      "再変換後は手動修正済みではなく変換済み（青）に戻る",
-      (await row2.locator(".refine-status-done").count()) === 1
+      "再変換後は手修正済みではなく AI変換済み（青）に戻る",
+      (await row2.locator(".refine-status-done").count()) === 1 &&
+        (await row2.locator(".refine-status").textContent()) === "AI変換済み"
     );
 
     // --- 再読み込みしても結果が残る（再変換の保存を待ってから） ---
@@ -145,7 +226,8 @@ export default async function run() {
     await page.waitForSelector("table.refine-table");
     r.check(
       "再読み込みしても整文結果が残る",
-      (await page.locator(".refine-status-done").count()) === 9
+      (await page.locator(".refine-status-done").count()) === 8 &&
+        (await page.locator(".refine-status-edited").count()) === 1
     );
 
     /* ---- 中断・再開（行数の多いデータで確実に間に合わせる） ---- */

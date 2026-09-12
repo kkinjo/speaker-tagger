@@ -14,18 +14,26 @@ type Transient = "pending" | "error";
 
 type RowStatus = "empty" | "pending" | "done" | "edited" | "error";
 
+/**
+ * 第3章 3.3 のラベル。
+ *
+ * 整文結果が無い行は、出力画面でそのまま原文が採用される（第7章）。
+ * 「処理されていない」のではなく「原文を採用している」状態なので、
+ * 「未変換」ではなく「原文のまま出力」と書く。
+ */
 const STATUS_LABEL: Record<RowStatus, string> = {
-  empty: "未変換",
+  empty: "原文のまま出力",
   pending: "変換中",
-  done: "変換済み",
-  edited: "手動修正済み",
-  error: "失敗（もう一度試すには再変換ボタン）",
+  done: "AI変換済み",
+  edited: "手修正済み",
+  error: "失敗",
 };
 
 type RowProps = {
   block: Block;
   status: RowStatus;
-  text: string;
+  /** 整文結果。無い行（＝原文がそのまま出力される行）は null */
+  text: string | null;
   running: boolean;
   onEdit: (block: Block, value: string) => void;
   onRetry: (block: Block) => void;
@@ -37,44 +45,105 @@ type RowProps = {
  */
 const Row = memo(function Row({ block, status, text, running, onEdit, onRetry }: RowProps) {
   const taRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * 整文結果がまだ無い行を、原文を入れた状態で開いているときの下書き。
+   * null なら開いていない（＝原文を薄いグレーで表示している状態）。
+   */
+  const [draft, setDraft] = useState<string | null>(null);
+  const wantFocus = useRef(false);
+
+  const speaker = block.speakers.join(" / ") || "未割り当て";
+  // 整文結果があるか、原文を入れて開いている間は textarea で編集できる
+  const editing = text !== null || draft !== null;
+  const value = text ?? draft ?? "";
 
   useEffect(() => {
     const el = taRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
-  }, [text]);
+  }, [value, editing]);
+
+  useEffect(() => {
+    if (editing && wantFocus.current) {
+      wantFocus.current = false;
+      taRef.current?.focus();
+    }
+  }, [editing]);
+
+  /** 薄いグレーの原文をクリックしたとき。原文が入った状態で編集を始める */
+  const openWithOriginal = () => {
+    wantFocus.current = true;
+    setDraft(block.body);
+  };
+
+  /**
+   * 何も直さずにフォーカスを外しただけでも確定させる（第4章 4.6）。
+   * 「はい」のような整文不要の発言を、AI に投げずに処理済みにする経路。
+   */
+  const commitOnBlur = () => {
+    if (text === null && draft !== null) onEdit(block, draft);
+    setDraft(null);
+  };
 
   return (
     <tr>
       <td className="refine-original">
-        <div className="refine-speaker">{block.speakers.join(" / ") || "未割り当て"}</div>
+        <div className="refine-speaker">{speaker}</div>
         <div className="refine-body">{block.body}</div>
       </td>
       <td className="refine-status-cell">
-        <span
-          className={`refine-status refine-status-${status}`}
-          role="img"
-          aria-label={STATUS_LABEL[status]}
-          title={STATUS_LABEL[status]}
-        />
         <button
           className="btn btn-sm"
           onClick={() => onRetry(block)}
           disabled={running}
-          title="この行を再変換"
+          title={
+            status === "error"
+              ? "この行を再変換（失敗した行はここから復旧できます）"
+              : "この行を再変換"
+          }
         >
           ↻
         </button>
       </td>
       <td className="refine-output">
-        <textarea
-          ref={taRef}
-          value={text}
-          onChange={(e) => onEdit(block, e.target.value)}
-          placeholder="未変換"
-          rows={1}
-        />
+        {/* 上段：話者とステータス。1列目と重複するが、3列目だけを見て
+            出力内容が把握できる状態を保つため省略しない（第4章 4.1） */}
+        <div className="refine-out-head">
+          <span className="refine-out-speaker">{speaker}</span>
+          <span className={`refine-status refine-status-${status}`}>
+            {STATUS_LABEL[status]}
+          </span>
+        </div>
+        {editing ? (
+          <textarea
+            ref={taRef}
+            value={value}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              onEdit(block, e.target.value);
+            }}
+            onBlur={commitOnBlur}
+            placeholder="整文後のテキスト"
+            rows={1}
+          />
+        ) : (
+          <div
+            className="refine-out-original"
+            role="button"
+            tabIndex={0}
+            onClick={openWithOriginal}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                openWithOriginal();
+              }
+            }}
+            title="クリックすると編集できます。そのまま外すと、この原文で確定します"
+          >
+            {block.body}
+          </div>
+        )}
       </td>
     </tr>
   );
@@ -89,6 +158,8 @@ export default function RefineApp({ project }: { project: Project }) {
   const [refinements, setRefinements] = useState<Refinements>(project.refinements);
   const [transient, setTransient] = useState<Record<string, Transient>>({});
   const [overwriteDone, setOverwriteDone] = useState(false);
+  /** 表示の絞り込み（第4章 4.2）。true なら「原文のまま出力」の行だけ */
+  const [onlyRaw, setOnlyRaw] = useState(false);
   const [running, setRunning] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const abortRef = useRef(false);
@@ -181,6 +252,21 @@ export default function RefineApp({ project }: { project: Project }) {
     () => utteranceBlocks.filter((b) => Boolean(refinements[blockSourceKey(b)])).length,
     [utteranceBlocks, refinements]
   );
+
+  /**
+   * 3列目は未変換の行にも原文が入っているため、スクロールして残作業を
+   * 目で数えることができない。絞り込んで0行になることをもって
+   * 処理漏れが無いことを確認する（第4章 4.2）。
+   *
+   * 議題見出しは整文対象ではないので、絞り込み中は一緒に隠す。
+   * 残さないと「0行になった」の確認が成立しない。
+   */
+  const visibleBlocks = useMemo(() => {
+    if (!onlyRaw) return doc.blocks;
+    return doc.blocks.filter(
+      (b) => b.kind === "utterance" && !refinements[blockSourceKey(b)]
+    );
+  }, [doc.blocks, onlyRaw, refinements]);
 
   /* ---- 1行変換 ---- */
   const refineOne = useCallback(
@@ -311,6 +397,17 @@ export default function RefineApp({ project }: { project: Project }) {
         <span className="refine-progress">
           <strong>{doneCount}</strong> / {utteranceBlocks.length} 行 完了
         </span>
+        <label className="refine-filter">
+          表示
+          <select
+            value={onlyRaw ? "raw" : "all"}
+            onChange={(e) => setOnlyRaw(e.target.value === "raw")}
+            aria-label="表示の絞り込み"
+          >
+            <option value="all">すべて</option>
+            <option value="raw">「原文のまま出力」の行だけ</option>
+          </select>
+        </label>
         <div className="spacer" />
         <span
           className={`save-state ${
@@ -332,18 +429,20 @@ export default function RefineApp({ project }: { project: Project }) {
             <tr>
               <th>話者 ／ 原文</th>
               <th></th>
-              <th>整文後</th>
+              <th>出力される内容（クリックで編集）</th>
             </tr>
           </thead>
           <tbody>
-            {doc.blocks.length === 0 ? (
+            {visibleBlocks.length === 0 ? (
               <tr>
                 <td colSpan={3} className="muted">
-                  話者整理画面でテキストを編集すると、ここに発言が表示されます。
+                  {onlyRaw
+                    ? "「原文のまま出力」の行はありません。処理漏れはありません。"
+                    : "話者整理画面でテキストを編集すると、ここに発言が表示されます。"}
                 </td>
               </tr>
             ) : null}
-            {doc.blocks.map((block) => {
+            {visibleBlocks.map((block) => {
               if (block.kind === "heading") {
                 return (
                   <tr key={block.index} className="refine-heading-row">
@@ -357,7 +456,7 @@ export default function RefineApp({ project }: { project: Project }) {
                   key={block.index}
                   block={block}
                   status={statusOf(block)}
-                  text={refinements[key]?.text ?? ""}
+                  text={refinements[key]?.text ?? null}
                   running={running}
                   onEdit={handleEdit}
                   onRetry={handleRetry}

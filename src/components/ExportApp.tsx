@@ -36,7 +36,8 @@ export default function ExportApp({
     [doc.blocks]
   );
 
-  // 「整文後」を選んだとき、整文結果が無い行が何件あるか（第7章 7.2）
+  // 「整文後」を選んだとき、整文結果が無く原文がそのまま出る行が何件あるか。
+  // ②で処理漏れがあった場合に、コピーする前に気づけるようにする（第7章 7.2）
   const unrefinedCount = useMemo(
     () =>
       utteranceBlocks.filter((b) => !project.refinements[blockSourceKey(b)]).length,
@@ -121,7 +122,7 @@ export default function ExportApp({
         <div className="spacer" />
         {useRefined && unrefinedCount > 0 ? (
           <span className="muted" style={{ fontSize: 12 }}>
-            未整文の行が {unrefinedCount} 件あります（その行は原文がそのまま使われます）
+            「原文のまま出力」の行が {unrefinedCount} 行あります（②整文画面で確認できます）
           </span>
         ) : null}
         {copied ? <span className="muted">{copied}</span> : null}

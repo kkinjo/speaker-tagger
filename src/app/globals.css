@@ -921,8 +921,9 @@ table.refine-table {
   background: #fff;
 }
 
+/* 2列目は再変換ボタンだけなので幅を詰める（第4章 4.1） */
 table.refine-table col.refine-col-status {
-  width: 64px;
+  width: 44px;
 }
 
 table.refine-table th,
@@ -957,34 +958,34 @@ table.refine-table thead th {
 }
 
 .refine-status-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
+  text-align: center;
+  padding: 6px 4px;
 }
 
+/* ステータスは3列目の上段に文字で出す。話者の横で横幅に余裕があるため、
+   色ドットのような省略表現は使わない（第4章 4.1）。色は補助に留める */
 .refine-status {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--border-strong);
+  font-size: 12px;
+  white-space: nowrap;
   flex: none;
+  color: var(--fg-muted);
 }
 
 .refine-status-done {
-  background: var(--accent);
+  color: var(--accent);
 }
 
 .refine-status-edited {
-  background: var(--ok);
+  color: var(--ok);
 }
 
 .refine-status-error {
-  background: var(--danger);
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .refine-status-pending {
-  background: var(--accent);
+  color: var(--accent);
   animation: refine-pulse 0.9s ease-in-out infinite;
 }
 
@@ -996,6 +997,46 @@ table.refine-table thead th {
   50% {
     opacity: 0.25;
   }
+}
+
+.refine-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+/* 3列目の上段。左に話者、右にステータス（第4章 4.1） */
+.refine-out-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 3px;
+}
+
+.refine-out-speaker {
+  font-size: 12px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 整文結果が無い行の下段。実際に出力されるのは原文なので原文を出し、
+   AI を通っていないことが分かるよう薄く表示する（第3章 3.3） */
+.refine-out-original {
+  white-space: pre-wrap;
+  color: var(--fg-muted);
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  cursor: text;
+}
+
+.refine-out-original:hover,
+.refine-out-original:focus {
+  border: 1px solid var(--border-strong);
+  outline: none;
 }
 
 .refine-output textarea {
