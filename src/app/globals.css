@@ -947,6 +947,32 @@ table.minutes tr.row-done td.speaker {
   flex-wrap: wrap;
 }
 
+/* プリセットの注記と失敗の内容。ツールバーのすぐ下に置く */
+.refine-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 16px;
+  font-size: 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.refine-error-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: #7f1d1d;
+  background: #fee2e2;
+  border-bottom: 1px solid #fca5a5;
+}
+
+.refine-error-note span {
+  flex: 1;
+}
+
 .refine-progress {
   font-size: 13px;
 }

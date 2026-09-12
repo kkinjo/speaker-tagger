@@ -102,6 +102,12 @@ export type Project = {
   refinements: Refinements;
   /** この会議固有の固有名詞（全体リストは src/lib/glossary.ts 側） */
   glossary: string[];
+  /**
+   * 整文プロンプトのプリセット id（src/lib/refine.ts の PROMPT_PRESETS）。
+   * 既存プロジェクトには無いので未設定を許容し、その場合は既定の
+   * プリセット（formal）として扱う。
+   */
+  promptPresetId?: string;
 };
 
 /**

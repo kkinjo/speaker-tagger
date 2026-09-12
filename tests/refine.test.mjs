@@ -1,11 +1,13 @@
 import { buildFixtures } from "./fixtures.mjs";
 import { createProject, importJson, launch, newProject, reporter } from "./helpers.mjs";
+import { setStubMode, stubCalls } from "./anthropicStub.mjs";
 
 /**
- * 整文画面の UI（第4章 / 第8章 実装の順序 #5）。
- * この段階では Anthropic API を呼ばず、ダミー実装（src/editor/refineClient.ts）
- * で代替している。完了条件: ボタンを押すと3列目にダミー文字列が入る。
- * ステータス遷移・一括変換・中断・保存・再開がすべて動く。
+ * 整文画面（第4章 / 第5章）。
+ *
+ * 整文は `/api/refine` 経由で Anthropic API を呼ぶ。テストでは本物の API では
+ * なくスタブ（tests/anthropicStub.mjs）に向け、成功時は「原文 + (ダミー整文)」を
+ * 返させる。429 / 5xx を意図して起こし、第5.5章のエラー処理も確認する。
  */
 export default async function run() {
   const files = buildFixtures();
@@ -160,7 +162,8 @@ export default async function run() {
       { timeout: 6000 }
     );
 
-    // --- 一括変換：3列目にダミー文字列が入る ---
+    // --- 一括変換：3列目にスタブの応答が入る ---
+    await setStubMode("ok");
     // 1行は上で「原文のまま確定」したので、一括変換の対象は残り8行
     await page.getByRole("button", { name: "一括変換" }).click();
     await page.waitForFunction(
@@ -177,7 +180,13 @@ export default async function run() {
       .locator("table.refine-table textarea")
       .nth(1)
       .inputValue();
-    r.check("3列目にダミー文字列が入る", firstText.endsWith("(ダミー整文)"), firstText);
+    r.check("3列目に API の応答が入る", firstText.endsWith("(ダミー整文)"), firstText);
+    r.check(
+      "整文対象の本文が API に渡っている（前後の行ではなく対象発言）",
+      firstText ===
+        `${await page.locator("table.refine-table .refine-body").nth(1).textContent()}(ダミー整文)`,
+      firstText
+    );
     r.check(
       "進捗表示が 9/9 になる",
       /9\s*\/\s*9/.test((await page.locator(".refine-progress").textContent()) ?? "")
@@ -266,6 +275,113 @@ export default async function run() {
       "再読み込みしても整文結果が残る",
       (await page.locator(".refine-status-done").count()) === 8 &&
         (await page.locator(".refine-status-edited").count()) === 1
+    );
+
+    /* ---- エラー処理（第5.5章） ---- */
+    const errorUrl = await createProject(page, "エラー処理のテスト");
+    await importJson(page, files.sample);
+    await page.waitForFunction(
+      () => document.querySelector(".save-state")?.textContent?.includes("保存済み"),
+      null,
+      { timeout: 8000 }
+    );
+    await page.goto(errorUrl + "/refine");
+    await page.waitForSelector("table.refine-table");
+    const errorRows = await page
+      .locator("table.refine-table tbody tr:not(.refine-heading-row)")
+      .count();
+
+    // --- 429：即座にループを停止し、リトライしない ---
+    await setStubMode("429");
+    await page.getByRole("button", { name: "一括変換" }).click();
+    await page.waitForSelector(".refine-error-note", { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const callsAfter429 = await stubCalls();
+    r.check(
+      "429 なら1行目で停止する（後続の行は処理しない）",
+      (await page.locator(".refine-status-error").count()) === 1 &&
+        (await page.locator(".refine-status-empty").count()) === errorRows - 1
+    );
+    r.check(
+      "429 はリトライしない（API 呼び出しは1回だけ）",
+      callsAfter429 === 1,
+      `calls=${callsAfter429}`
+    );
+    r.check(
+      "停止した理由が画面に出る",
+      ((await page.locator(".refine-error-note").textContent()) ?? "").includes("中断")
+    );
+
+    // --- 5xx：1回だけリトライし、駄目なら失敗にして次の行へ進む ---
+    await setStubMode("500");
+    await page.getByRole("button", { name: "一括変換" }).click();
+    await page.waitForFunction(
+      (total) => document.querySelectorAll(".refine-status-error").length >= total,
+      errorRows,
+      { timeout: 30000 }
+    );
+    await page.waitForTimeout(500);
+    const callsAfter500 = await stubCalls();
+    r.check(
+      "5xx でも全行を処理して進む（途中で止まらない）",
+      (await page.locator(".refine-status-error").count()) === errorRows
+    );
+    r.check(
+      "5xx は1回だけリトライする（1行あたり2回）",
+      callsAfter500 === errorRows * 2,
+      `calls=${callsAfter500} rows=${errorRows}`
+    );
+
+    // --- 失敗した行は個別再変換ボタンから復旧できる（第5.5章） ---
+    await setStubMode("ok");
+    await page
+      .locator("table.refine-table tbody tr:not(.refine-heading-row)")
+      .first()
+      .locator('button[title^="この行を再変換"]')
+      .click();
+    await page.waitForFunction(
+      () => document.querySelectorAll(".refine-status-done").length === 1,
+      null,
+      { timeout: 10000 }
+    );
+    r.check(
+      "失敗した行は個別再変換ボタンから復旧できる",
+      (await page.locator(".refine-status-done").count()) === 1 &&
+        (await page.locator(".refine-status-error").count()) === errorRows - 1
+    );
+
+    /* ---- プリセット（第5.4章 / 文体の切り替え） ---- */
+    r.check(
+      "既定のプリセットは「公式議事録」",
+      (await page.getByLabel("プロンプトのプリセット").inputValue()) === "formal"
+    );
+    await page.getByLabel("プロンプトのプリセット").selectOption("plain");
+    r.check(
+      "切り替えても既存の整文結果は変わらない旨が画面に出る",
+      ((await page.locator(".refine-note").textContent()) ?? "").includes(
+        "変換済み・手修正済みの行はそのまま"
+      )
+    );
+    const doneBefore = await page
+      .locator("table.refine-table textarea")
+      .first()
+      .inputValue();
+    await page.waitForFunction(
+      () => document.querySelector(".save-state")?.textContent?.includes("保存済み"),
+      null,
+      { timeout: 8000 }
+    );
+    await page.reload();
+    await page.waitForSelector("table.refine-table");
+    r.check(
+      "選んだプリセットは保存され、再読み込みしても残る",
+      (await page.getByLabel("プロンプトのプリセット").inputValue()) === "plain"
+    );
+    r.check(
+      "プリセットを切り替えても既存の refinements は変わらない",
+      (await page.locator("table.refine-table textarea").first().inputValue()) ===
+        doneBefore,
+      doneBefore
     );
 
     /* ---- 中断・再開（行数の多いデータで確実に間に合わせる） ---- */

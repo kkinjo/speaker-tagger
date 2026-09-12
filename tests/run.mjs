@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BASE } from "./helpers.mjs";
+import { STUB_API_URL, startStub } from "./anthropicStub.mjs";
 
 /**
  * ビルド済みのアプリを起動し、全テストを順に流す。
@@ -11,6 +12,7 @@ import { BASE } from "./helpers.mjs";
 
 const port = new URL(BASE).port || "3100";
 let server = null;
+let stub = null;
 let dataDir = null;
 
 async function reachable() {
@@ -30,6 +32,9 @@ async function startServer() {
       ...process.env,
       APP_SECRET: "test-secret",
       DATA_DIR: dataDir,
+      // 整文は本物の Anthropic API ではなくスタブへ向ける（tests/anthropicStub.mjs）
+      ANTHROPIC_API_KEY: "test-key",
+      REFINE_API_URL: STUB_API_URL,
       // テストは必ずファイル保存側で動かす（本番の KV を触らない）
       KV_REST_API_URL: "",
       KV_REST_API_TOKEN: "",
@@ -44,12 +49,20 @@ async function startServer() {
   throw new Error(`サーバーが起動しませんでした (${BASE})`);
 }
 
-const started = !(await reachable());
-if (started) {
+// 整文のスタブは、アプリを使い回す場合にも要る（tests/refine.test.mjs が
+// 直接叩いて応答の種類を切り替えるため）。既に動いていればそれを使う。
+try {
+  stub = await startStub();
+} catch (e) {
+  if (e.code !== "EADDRINUSE") throw e;
+  console.log("既に動いている整文スタブを使います");
+}
+
+if (await reachable()) {
+  console.log(`既に動いているサーバーを使います (${BASE})`);
+} else {
   console.log(`サーバーを起動します (${BASE})`);
   await startServer();
-} else {
-  console.log(`既に動いているサーバーを使います (${BASE})`);
 }
 
 const suites = [
@@ -76,6 +89,7 @@ try {
   }
 } finally {
   if (server) server.kill("SIGKILL");
+  if (stub) stub.close();
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
 }
 

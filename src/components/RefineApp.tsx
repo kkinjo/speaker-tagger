@@ -2,10 +2,10 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Refinements } from "@/lib/types";
+import type { PromptPreset } from "@/lib/refine";
 import { parseDoc, type Block } from "@/editor/parse";
 import { blockSourceKey } from "@/editor/refine";
-import { requestRefine } from "@/editor/refineClient";
-import { GLOBAL_GLOSSARY } from "@/lib/glossary";
+import { requestRefine, RefineRequestError } from "@/editor/refineClient";
 import GlossaryPanel from "./GlossaryPanel";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
@@ -168,12 +168,24 @@ const Row = memo(function Row({
   );
 });
 
+/** 一括変換ループがリトライ要否を判断するための結果 */
+type RefineOutcome = { ok: true } | { ok: false; error: RefineRequestError };
+
 /**
  * 整文画面（②）。第4章の UI を実装する。
- * この段階では Anthropic API を呼ばず、`requestRefine`（ダミー実装。
- * src/editor/refineClient.ts）で代替する。
+ * 整文は `/api/refine` 経由で Anthropic API を呼ぶ（第5章）。
+ *
+ * `presets` はサーバーコンポーネント側（refine/page.tsx）から渡す。
+ * プロンプト組み立てと API キーの読み取りを含む `@/lib/refine` を
+ * クライアントバンドルへ持ち込まないため。
  */
-export default function RefineApp({ project }: { project: Project }) {
+export default function RefineApp({
+  project,
+  presets,
+}: {
+  project: Project;
+  presets: PromptPreset[];
+}) {
   const [refinements, setRefinements] = useState<Refinements>(project.refinements);
   /**
    * この会議固有の固有名詞（第6章）。整文で AI に渡す情報なので、
@@ -181,6 +193,13 @@ export default function RefineApp({ project }: { project: Project }) {
    */
   const [glossary, setGlossary] = useState<string[]>(project.glossary);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
+  /**
+   * 整文プロンプトのプリセット（第5.4章）。既存プロジェクトには
+   * promptPresetId が無いので、その場合は既定（先頭 = formal）に倒す。
+   */
+  const [presetId, setPresetId] = useState<string>(
+    project.promptPresetId ?? presets[0].id
+  );
   const [transient, setTransient] = useState<Record<string, Transient>>({});
   const [overwriteDone, setOverwriteDone] = useState(false);
   /** 表示の絞り込み（第4章 4.2）。true なら「原文のまま出力」の行だけ */
@@ -194,6 +213,8 @@ export default function RefineApp({ project }: { project: Project }) {
   const [undoNotice, setUndoNotice] = useState<{ key: string; updatedAt: number } | null>(
     null
   );
+  /** 直近の失敗の内容。理由が分からないまま「失敗」だけが並ぶのを避ける */
+  const [lastError, setLastError] = useState<string | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const undoNoticeRef = useRef(undoNotice);
   undoNoticeRef.current = undoNotice;
@@ -209,27 +230,29 @@ export default function RefineApp({ project }: { project: Project }) {
     [doc.blocks]
   );
 
-  // 全体リストと会議固有リストを結合し、重複を取り除く（第6章 6.1）
-  const combinedGlossary = useMemo(() => {
-    return [...new Set([...GLOBAL_GLOSSARY, ...glossary])];
-  }, [glossary]);
-
   /* ---- 保存（2秒デバウンス。第4章 4.4） ---- */
   const dirtyRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const payloadRef = useRef({ refinements, glossary });
-  payloadRef.current = { refinements, glossary };
+  const payloadRef = useRef({ refinements, glossary, presetId });
+  payloadRef.current = { refinements, glossary, presetId };
+
+  const savePayload = () =>
+    JSON.stringify({
+      refinements: payloadRef.current.refinements,
+      glossary: payloadRef.current.glossary,
+      promptPresetId: payloadRef.current.presetId,
+    });
+  const savePayloadRef = useRef(savePayload);
+  savePayloadRef.current = savePayload;
 
   const save = useCallback(async () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaveState("saving");
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          refinements: payloadRef.current.refinements,
-          glossary: payloadRef.current.glossary,
-        }),
+        body: savePayloadRef.current(),
       });
       if (!res.ok) throw new Error("save failed");
       dirtyRef.current = false;
@@ -246,6 +269,18 @@ export default function RefineApp({ project }: { project: Project }) {
     saveTimer.current = setTimeout(() => void save(), 2000);
   }, [save]);
 
+  /**
+   * デバウンス待ちの変更を先に送り切る。
+   *
+   * `/api/refine` は固有名詞とプリセットを保存済みのプロジェクトから読み直す
+   * （クライアントから差し替えられないようにするため）。登録・切り替えた直後に
+   * 変換を始めると保存前の内容で整文されてしまうので、変換を始める前に必ず通す。
+   */
+  const flushSave = useCallback(async () => {
+    if (!dirtyRef.current) return;
+    await save();
+  }, [save]);
+
   useEffect(() => () => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
   }, []);
@@ -260,10 +295,7 @@ export default function RefineApp({ project }: { project: Project }) {
       void fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          refinements: payloadRef.current.refinements,
-          glossary: payloadRef.current.glossary,
-        }),
+        body: savePayloadRef.current(),
         keepalive: true,
       });
     };
@@ -278,6 +310,18 @@ export default function RefineApp({ project }: { project: Project }) {
   const handleGlossaryChange = useCallback(
     (next: string[]) => {
       setGlossary(next);
+      scheduleSave();
+    },
+    [scheduleSave]
+  );
+
+  /**
+   * プリセットの切り替え（第5.4章）。
+   * 以後の変換にだけ効く。既にある refinements には手を触れない。
+   */
+  const handlePresetChange = useCallback(
+    (next: string) => {
+      setPresetId(next);
       scheduleSave();
     },
     [scheduleSave]
@@ -319,17 +363,16 @@ export default function RefineApp({ project }: { project: Project }) {
 
   /* ---- 1行変換 ---- */
   const refineOne = useCallback(
-    async (block: Block) => {
+    async (block: Block): Promise<RefineOutcome> => {
       const key = blockSourceKey(block);
       const idx = utteranceBlocks.indexOf(block);
       setTransient((t) => ({ ...t, [key]: "pending" }));
       try {
         const text = await requestRefine({
+          projectId: project.id,
           body: block.body,
           prevBody: utteranceBlocks[idx - 1]?.body ?? null,
           nextBody: utteranceBlocks[idx + 1]?.body ?? null,
-          participants: project.participants,
-          glossary: combinedGlossary,
         });
         setRefinements((r) => ({
           ...r,
@@ -341,11 +384,19 @@ export default function RefineApp({ project }: { project: Project }) {
           return next;
         });
         scheduleSave();
-      } catch {
+        return { ok: true };
+      } catch (e) {
+        // 「失敗」は保存しない一時状態。個別再変換ボタンから復旧できる（第5.5章）
+        const error =
+          e instanceof RefineRequestError
+            ? e
+            : new RefineRequestError(String(e));
         setTransient((t) => ({ ...t, [key]: "error" }));
+        setLastError(error.message);
+        return { ok: false, error };
       }
     },
-    [utteranceBlocks, project.participants, combinedGlossary, scheduleSave]
+    [utteranceBlocks, project.id, scheduleSave]
   );
 
   /* ---- 手で編集した場合 ---- */
@@ -412,9 +463,11 @@ export default function RefineApp({ project }: { project: Project }) {
         );
         if (!ok) return;
       }
-      void refineOne(block);
+      setLastError(null);
+      // 固有名詞・プリセットの変更が未保存なら先に送る（サーバーが読むのは保存済みの値）
+      void flushSave().then(() => refineOne(block));
     },
-    [refinements, refineOne]
+    [refinements, refineOne, flushSave]
   );
 
   /* ---- 一括変換（第4章 4.3） ---- */
@@ -441,18 +494,50 @@ export default function RefineApp({ project }: { project: Project }) {
 
     if (targets.length === 0) return;
 
+    // 登録・切り替えたばかりの固有名詞とプリセットで変換されるよう、保存を先に済ませる
+    await flushSave();
+
     abortRef.current = false;
+    setLastError(null);
     setRunning(true);
     for (const block of targets) {
       if (abortRef.current) break;
-      await refineOne(block);
+
+      let outcome = await refineOne(block);
+
+      // 429（レート制限・利用上限）はリトライせず即座にループを停止する。
+      // 上限に達している可能性があり、叩き続けると状況が悪化する（第5.5章）
+      if (!outcome.ok && outcome.error.isRateLimited) {
+        setLastError(
+          `レート制限または利用上限に達したため中断しました。しばらく待ってから再開してください。（${outcome.error.message}）`
+        );
+        break;
+      }
+
+      // 5xx・接続失敗は1回だけリトライする（第5.5章）
+      if (!outcome.ok && outcome.error.isRetryable) {
+        if (abortRef.current) break;
+        outcome = await refineOne(block);
+        if (!outcome.ok && outcome.error.isRateLimited) {
+          setLastError(
+            `レート制限または利用上限に達したため中断しました。しばらく待ってから再開してください。（${outcome.error.message}）`
+          );
+          break;
+        }
+      }
+
+      // それでも失敗した行は「失敗」のまま次へ進む。
+      // 復旧は個別再変換ボタンから行う（第5.5章）
     }
     setRunning(false);
-  }, [utteranceBlocks, refinements, overwriteDone, refineOne]);
+  }, [utteranceBlocks, refinements, overwriteDone, refineOne, flushSave]);
 
   const abort = useCallback(() => {
     abortRef.current = true;
   }, []);
+
+  const selectedPreset =
+    presets.find((p) => p.id === presetId) ?? presets[0];
 
   const saveLabel =
     saveState === "saved"
@@ -488,6 +573,21 @@ export default function RefineApp({ project }: { project: Project }) {
           <strong>{doneCount}</strong> / {utteranceBlocks.length} 行 完了
         </span>
         <label className="refine-filter">
+          文体
+          <select
+            value={presetId}
+            disabled={running}
+            onChange={(e) => handlePresetChange(e.target.value)}
+            aria-label="プロンプトのプリセット"
+          >
+            {presets.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="refine-filter">
           表示
           <select
             value={onlyRaw ? "raw" : "all"}
@@ -514,6 +614,25 @@ export default function RefineApp({ project }: { project: Project }) {
           {saveLabel}
         </span>
       </div>
+
+      {/* プリセットは以後の変換にだけ効く。既にある結果が書き換わると
+          誤解されないよう、切り替え位置のすぐ下に明示する */}
+      <div className="refine-note">
+        <span>{selectedPreset.hint}</span>
+        <span className="muted">
+          切り替えても、変換済み・手修正済みの行はそのままです。新しい文体にするには、
+          その行を再変換してください。
+        </span>
+      </div>
+
+      {lastError ? (
+        <div className="refine-error-note" role="alert">
+          <span>{lastError}</span>
+          <button className="btn btn-sm" onClick={() => setLastError(null)}>
+            閉じる
+          </button>
+        </div>
+      ) : null}
 
       {glossaryOpen ? (
         <div className="drawer">

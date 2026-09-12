@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { kv, keys } from "@/lib/kv";
 import { currentUser } from "@/lib/auth";
 import { loadOwned, removeFromIndex, upsertIndex } from "@/lib/projects";
+import { isPresetId } from "@/lib/refine";
 import type { Participant, Project } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +52,10 @@ export async function PATCH(req: Request, { params }: Ctx) {
       .filter((t): t is string => typeof t === "string")
       .map((t) => t.trim())
       .filter(Boolean);
+  }
+  // 既存プロジェクトには無いフィールド。未知の id は既定のプリセットに任せる
+  if (isPresetId(patch.promptPresetId)) {
+    next.promptPresetId = patch.promptPresetId;
   }
   next.updatedAt = Date.now();
 

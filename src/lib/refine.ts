@@ -1,0 +1,238 @@
+import { mergeGlossary } from "./glossary";
+
+/* ------------------------------------------------------------------ *
+ * プリセット
+ * ------------------------------------------------------------------ */
+
+export type PromptPreset = {
+  id: string;
+  name: string;
+  /** 利用者向けの補足。UI のセレクトに添える */
+  hint: string;
+  /** 語尾処理の方針。共通プロンプトに差し込む差分はここだけ */
+  endingPolicy: string;
+};
+
+export const PROMPT_PRESETS: PromptPreset[] = [
+  {
+    id: "formal",
+    name: "公式議事録",
+    hint: "体言止めにして固い文体にする。会長会・校長会向け",
+    endingPolicy:
+      "- 「〜ですか？」「〜です」等の語尾を落とし、可能な範囲で体言止めにする\n" +
+      "- ただし体言止めにすると意味が変わる、または不自然になる場合は語尾を残す",
+  },
+  {
+    id: "plain",
+    name: "発言そのまま",
+    hint: "丁寧語を残して柔らかい文体にする。副会長会・特支・幼稚園部会向け",
+    endingPolicy:
+      "- 語尾は変更しない。「です」「ですね」「ですか？」等の丁寧語はそのまま残す\n" +
+      "- 体言止めにはしない",
+  },
+];
+
+export const DEFAULT_PRESET_ID = "formal";
+
+export function getPreset(id: string | undefined): PromptPreset {
+  return (
+    PROMPT_PRESETS.find((p) => p.id === id) ??
+    PROMPT_PRESETS.find((p) => p.id === DEFAULT_PRESET_ID)!
+  );
+}
+
+/** 未知の値を弾く。既存プロジェクトには promptPresetId が無いので undefined も許す */
+export function isPresetId(value: unknown): value is string {
+  return typeof value === "string" && PROMPT_PRESETS.some((p) => p.id === value);
+}
+
+/* ------------------------------------------------------------------ *
+ * プロンプト
+ * ------------------------------------------------------------------ */
+
+/**
+ * system プロンプトを組み立てる。
+ * 内容は project 単位で固定されるため、プロンプトキャッシュの対象にできる。
+ */
+export function buildSystemPrompt(args: {
+  preset: PromptPreset;
+  glossary: string[];
+  participants: string[];
+}): string {
+  const { preset, glossary, participants } = args;
+
+  return `あなたは会議議事録の整文を行うアシスタントです。
+
+## 整文の定義
+発言の意味を変えずに、文書として読める形へ整えます。
+
+行うこと:
+- フィラー（「えーっと」「あのー」「なんか」等）の除去
+- 言い淀み・言い直しの統合
+- 冗長な繰り返しの圧縮
+${preset.endingPolicy}
+
+行わないこと:
+- 複数の発言をまとめること
+- 前後の文脈から論点を再構成すること
+- 発言に含まれない情報を補うこと
+- 下記の固有名詞リストにある語の表記を変更すること（略称・正式名称いずれの表記も、そのままの形で残す）
+
+## 出力形式
+- 整文後のテキストのみを出力する。前置き・説明・引用符・見出しは一切付けない
+- 入力は1発言、出力も1発言。分割や結合はしない
+- 意味が取れない発言、整えると意味が変わる恐れがある発言は、無理に整えず原文のまま返す
+
+## 前後の発言について
+「前の発言」「次の発言」は、指示語や省略された主語を理解するための文脈情報としてのみ使う。これらの内容を対象発言に取り込まない。
+
+## 固有名詞リスト（表記を変更しないこと）
+${glossary.join("、")}
+
+## 参加者リスト（人名の変換に注意）
+${participants.join("、")}`;
+}
+
+function buildUserPrompt(args: {
+  body: string;
+  prevBody?: string;
+  nextBody?: string;
+}): string {
+  const prev = args.prevBody?.trim() || "（なし）";
+  const next = args.nextBody?.trim() || "（なし）";
+
+  return `前の発言: ${prev}
+
+対象発言: ${args.body}
+
+次の発言: ${next}
+
+対象発言のみを整文して出力してください。`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Anthropic API 呼び出し
+ * ------------------------------------------------------------------ */
+
+/** 呼び出し側が 429 と 5xx を区別できるようにする（第5.5章） */
+export class RefineError extends Error {
+  constructor(
+    message: string,
+    /** HTTP ステータス。ネットワーク障害等では undefined */
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "RefineError";
+  }
+}
+
+/**
+ * 既定は本番の Anthropic API。
+ * `REFINE_API_URL` は e2e テストでスタブに向けるための差し替え口で、
+ * 本番では設定しない。
+ */
+const API_URL = process.env.REFINE_API_URL ?? "https://api.anthropic.com/v1/messages";
+
+/** 既定は Claude Sonnet 5。コスト優先なら環境変数で Haiku 4.5 に切り替える（第5.2章） */
+const MODEL = process.env.REFINE_MODEL ?? "claude-sonnet-5";
+
+/**
+ * 前置きの混入を防ぐための assistant prefill（空文字）。
+ *
+ * 【既定で無効。理由】
+ * assistant prefill は Claude Sonnet 5 / Opus 5 および 4.6〜4.8 系で廃止され、
+ * 送ると 400 が返る。つまり既定モデル（claude-sonnet-5）では整文が全件失敗する。
+ * 加えて prefill は「応答の書き出しを固定する」仕組みなので、空文字では
+ * 固定する文字が無く、prefill が使えるモデルでも前置き対策として働かない。
+ *
+ * 前置きの抑止は buildSystemPrompt() の「## 出力形式」に移してある。
+ *
+ * 消さずに残しているのは、prefill を受け付ける旧モデル（Haiku 4.5 等）を
+ * REFINE_MODEL で指定して試す余地を残すため。その場合だけ
+ * `REFINE_ASSISTANT_PREFILL=1` を設定する。
+ */
+const SEND_ASSISTANT_PREFILL = process.env.REFINE_ASSISTANT_PREFILL === "1";
+
+export type RefineArgs = {
+  body: string;
+  prevBody?: string;
+  nextBody?: string;
+  participants: string[];
+  /** Project.glossary。全体リストとの結合はこの関数の中で行う */
+  projectGlossary?: string[];
+  presetId?: string;
+};
+
+/**
+ * 1発言を整文する。
+ *
+ * 後から他のモデルへ差し替えられるよう、API 呼び出しはこの関数に閉じる（第5.1章）。
+ */
+export async function refine(args: RefineArgs): Promise<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new RefineError("ANTHROPIC_API_KEY が設定されていません");
+  }
+
+  const system = buildSystemPrompt({
+    preset: getPreset(args.presetId),
+    glossary: mergeGlossary(args.projectGlossary),
+    participants: args.participants,
+  });
+
+  const messages: Array<{ role: "user" | "assistant"; content: string }> = [
+    { role: "user", content: buildUserPrompt(args) },
+  ];
+  if (SEND_ASSISTANT_PREFILL) {
+    messages.push({ role: "assistant", content: "" });
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 1024,
+        // 1発言ずつ逐次処理するため、system 部分はほぼ毎回キャッシュヒットする
+        system: [
+          {
+            type: "text",
+            text: system,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+        messages,
+      }),
+    });
+  } catch (e) {
+    // ネットワーク障害。status を付けないので呼び出し側は 5xx と同じ扱いにする
+    throw new RefineError(`Anthropic API へ接続できませんでした: ${String(e)}`);
+  }
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new RefineError(
+      `Anthropic API error (${res.status}): ${detail.slice(0, 200)}`,
+      res.status,
+    );
+  }
+
+  const data = await res.json();
+  const text: string = (data.content ?? [])
+    .filter((b: { type: string }) => b.type === "text")
+    .map((b: { text: string }) => b.text)
+    .join("")
+    .trim();
+
+  if (!text) {
+    throw new RefineError("整文結果が空でした");
+  }
+
+  return text;
+}
