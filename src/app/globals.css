@@ -999,6 +999,23 @@ table.refine-table thead th {
   }
 }
 
+/* 「原文のまま確定」の直後だけ出る取り消しの案内（第4章 4.6）。
+   数秒で消えるため、画面の操作を邪魔しない位置に浮かせる */
+.refine-undo {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  z-index: 20;
+}
+
 .refine-filter {
   display: flex;
   align-items: center;

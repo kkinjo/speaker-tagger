@@ -104,6 +104,39 @@ export default async function run() {
       (await page.locator("table.refine-table tbody tr").count()) === 8
     );
 
+    /* --- 誤操作の取り消し（第4章 4.6） --- */
+    r.check(
+      "確定直後に取り消しの案内が出る",
+      (await page.locator(".refine-undo").count()) === 1 &&
+        ((await page.locator(".refine-undo").textContent()) ?? "").includes(
+          "原文のまま確定しました"
+        )
+    );
+    await page.locator(".refine-undo").getByRole("button", { name: "取り消す" }).click();
+    await page.waitForTimeout(300);
+    r.check(
+      "取り消すと確定前（原文のまま出力）に戻る",
+      (await page.locator("table.refine-table tbody tr").count()) === 9 &&
+        (await page.locator(".refine-status-edited").count()) === 0
+    );
+    r.check(
+      "取り消すと案内も消える",
+      (await page.locator(".refine-undo").count()) === 0
+    );
+
+    // 取り消した行を、もう一度「原文のまま確定」しておく
+    await page.locator("table.refine-table .refine-out-original").first().click();
+    await page.locator(".refine-toolbar").click();
+    await page.waitForTimeout(300);
+    r.check(
+      "取り消したあとでも、もう一度確定できる",
+      (await page.locator("table.refine-table tbody tr").count()) === 8
+    );
+
+    // 案内は数秒で自動的に消える（永続的なボタンは置かない）
+    await page.waitForSelector(".refine-undo", { state: "detached", timeout: 12000 });
+    r.check("取り消しの案内は数秒で自動的に消える", true);
+
     await page.getByLabel("表示の絞り込み").selectOption("all");
     await page.waitForTimeout(200);
     r.check(
@@ -173,7 +206,12 @@ export default async function run() {
     const row2 = rows.nth(1);
     const secondTextarea = row2.locator("textarea");
     await secondTextarea.fill("手で直したテキスト");
+    await page.locator(".refine-toolbar").click();
     await page.waitForTimeout(300);
+    r.check(
+      "1文字でも編集した場合は取り消しの案内を出さない（第4章 4.6）",
+      (await page.locator(".refine-undo").count()) === 0
+    );
     r.check(
       "手動編集した行は緑（手修正済み）になる",
       (await row2.locator(".refine-status-edited").count()) === 1 &&

@@ -14,6 +14,9 @@ type Transient = "pending" | "error";
 
 type RowStatus = "empty" | "pending" | "done" | "edited" | "error";
 
+/** 「原文のまま確定しました（取り消す）」を出しておく時間 */
+const UNDO_NOTICE_MS = 6000;
+
 /**
  * 第3章 3.3 のラベル。
  *
@@ -36,6 +39,8 @@ type RowProps = {
   text: string | null;
   running: boolean;
   onEdit: (block: Block, value: string) => void;
+  /** 何も編集せずに閉じたとき（＝原文のまま確定。第4章 4.6） */
+  onConfirmAsIs: (block: Block) => void;
   onRetry: (block: Block) => void;
 };
 
@@ -43,7 +48,15 @@ type RowProps = {
  * 1 行分。整文対象は数百行になり得るため、内容が変わった行だけ
  * 描き直されるよう memo する（TableView.tsx の Row と同じ考え方）。
  */
-const Row = memo(function Row({ block, status, text, running, onEdit, onRetry }: RowProps) {
+const Row = memo(function Row({
+  block,
+  status,
+  text,
+  running,
+  onEdit,
+  onConfirmAsIs,
+  onRetry,
+}: RowProps) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   /**
    * 整文結果がまだ無い行を、原文を入れた状態で開いているときの下書き。
@@ -80,9 +93,14 @@ const Row = memo(function Row({ block, status, text, running, onEdit, onRetry }:
   /**
    * 何も直さずにフォーカスを外しただけでも確定させる（第4章 4.6）。
    * 「はい」のような整文不要の発言を、AI に投げずに処理済みにする経路。
+   *
+   * 1文字でも打てば onChange 側で確定済み（text が入っている）なので、
+   * ここを通るのは「一度も編集しなかった」場合だけ。
+   * 見るだけのつもりでクリックした誤操作もここに来るため、
+   * 親に知らせて取り消しの案内を出してもらう。
    */
   const commitOnBlur = () => {
-    if (text === null && draft !== null) onEdit(block, draft);
+    if (text === null && draft !== null) onConfirmAsIs(block);
     setDraft(null);
   };
 
@@ -162,6 +180,16 @@ export default function RefineApp({ project }: { project: Project }) {
   const [onlyRaw, setOnlyRaw] = useState(false);
   const [running, setRunning] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  /**
+   * 「原文のまま確定」の直後だけ出す取り消しの案内（第4章 4.6）。
+   * 数秒で自動的に消える。永続的なボタンは置かない。
+   */
+  const [undoNotice, setUndoNotice] = useState<{ key: string; updatedAt: number } | null>(
+    null
+  );
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const undoNoticeRef = useRef(undoNotice);
+  undoNoticeRef.current = undoNotice;
   const abortRef = useRef(false);
 
   const doc = useMemo(
@@ -312,6 +340,47 @@ export default function RefineApp({ project }: { project: Project }) {
     [scheduleSave]
   );
 
+  /* ---- 原文のまま確定する（第4章 4.6） ---- */
+  const handleConfirmAsIs = useCallback(
+    (block: Block) => {
+      const key = blockSourceKey(block);
+      const updatedAt = Date.now();
+      setRefinements((r) => ({
+        ...r,
+        [key]: { text: block.body, edited: true, updatedAt },
+      }));
+      scheduleSave();
+      // 見るだけのつもりでクリックした場合に戻せるよう、直後だけ案内を出す
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      setUndoNotice({ key, updatedAt });
+      undoTimer.current = setTimeout(() => setUndoNotice(null), UNDO_NOTICE_MS);
+    },
+    [scheduleSave]
+  );
+
+  const undoConfirmAsIs = useCallback(() => {
+    const notice = undoNoticeRef.current;
+    if (!notice) return;
+    setRefinements((r) => {
+      const current = r[notice.key];
+      // 案内を出したあとでその行を触っていたら、何もしない
+      if (!current || current.updatedAt !== notice.updatedAt) return r;
+      const next = { ...r };
+      delete next[notice.key];
+      return next;
+    });
+    scheduleSave();
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setUndoNotice(null);
+  }, [scheduleSave]);
+
+  useEffect(
+    () => () => {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+    },
+    []
+  );
+
   /* ---- 個別再変換（第4章 4.5） ---- */
   const handleRetry = useCallback(
     (block: Block) => {
@@ -459,6 +528,7 @@ export default function RefineApp({ project }: { project: Project }) {
                   text={refinements[key]?.text ?? null}
                   running={running}
                   onEdit={handleEdit}
+                  onConfirmAsIs={handleConfirmAsIs}
                   onRetry={handleRetry}
                 />
               );
@@ -466,6 +536,18 @@ export default function RefineApp({ project }: { project: Project }) {
           </tbody>
         </table>
       </div>
+
+      {/* 原文のまま確定した直後だけ出す取り消しの案内（第4章 4.6）。
+          見るだけのつもりでクリックした誤操作を戻せるようにする。
+          数秒で自動的に消え、あとに何も残らない */}
+      {undoNotice ? (
+        <div className="refine-undo" role="status">
+          <span>原文のまま確定しました</span>
+          <button className="btn btn-sm" onClick={undoConfirmAsIs}>
+            取り消す
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
