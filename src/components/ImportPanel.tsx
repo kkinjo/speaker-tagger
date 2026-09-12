@@ -65,26 +65,25 @@ export default function ImportPanel({ projectId, imported, onImported }: Props) 
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <strong style={{ fontSize: 13 }}>
-          WhisperX の JSON を取り込む
-          {imported ? "（取り込み済み）" : ""}
-        </strong>
-        <label
-          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}
-        >
-          <input
-            type="checkbox"
-            checked={insertSeparators}
-            onChange={(e) => setInsertSeparators(e.target.checked)}
-          />
-          自動話者分離の切れ目に <code>--</code> をあらかじめ入れる
-        </label>
-      </div>
+      <strong style={{ fontSize: 13 }}>
+        WhisperX の JSON を取り込む
+        {imported ? "（取り込み済み）" : ""}
+      </strong>
+
+      {/* 取り込み方の指定なので、見出しの横ではなくドロップエリアの直上に置く。
+          見出しと並べると折り返して崩れる */}
+      <label className="import-option">
+        <input
+          type="checkbox"
+          checked={insertSeparators}
+          onChange={(e) => setInsertSeparators(e.target.checked)}
+        />
+        自動話者分離の切れ目に <code>--</code> をあらかじめ入れる
+      </label>
 
       <div
         className={`dropzone${over ? " over" : ""}`}
-        style={{ marginTop: 10, padding: 18 }}
+        style={{ padding: 18 }}
         onClick={() => inputRef.current?.click()}
         onDragOver={(e) => {
           e.preventDefault();

@@ -6,6 +6,7 @@ import { parseDoc, type Block } from "@/editor/parse";
 import { blockSourceKey } from "@/editor/refine";
 import { requestRefine } from "@/editor/refineClient";
 import { GLOBAL_GLOSSARY } from "@/lib/glossary";
+import GlossaryPanel from "./GlossaryPanel";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 
@@ -174,6 +175,12 @@ const Row = memo(function Row({
  */
 export default function RefineApp({ project }: { project: Project }) {
   const [refinements, setRefinements] = useState<Refinements>(project.refinements);
+  /**
+   * この会議固有の固有名詞（第6章）。整文で AI に渡す情報なので、
+   * ①話者整理画面ではなくこの画面が持つ。保存先は `Project.glossary` のまま。
+   */
+  const [glossary, setGlossary] = useState<string[]>(project.glossary);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [transient, setTransient] = useState<Record<string, Transient>>({});
   const [overwriteDone, setOverwriteDone] = useState(false);
   /** 表示の絞り込み（第4章 4.2）。true なら「原文のまま出力」の行だけ */
@@ -204,14 +211,14 @@ export default function RefineApp({ project }: { project: Project }) {
 
   // 全体リストと会議固有リストを結合し、重複を取り除く（第6章 6.1）
   const combinedGlossary = useMemo(() => {
-    return [...new Set([...GLOBAL_GLOSSARY, ...project.glossary])];
-  }, [project.glossary]);
+    return [...new Set([...GLOBAL_GLOSSARY, ...glossary])];
+  }, [glossary]);
 
   /* ---- 保存（2秒デバウンス。第4章 4.4） ---- */
   const dirtyRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const refinementsRef = useRef(refinements);
-  refinementsRef.current = refinements;
+  const payloadRef = useRef({ refinements, glossary });
+  payloadRef.current = { refinements, glossary };
 
   const save = useCallback(async () => {
     setSaveState("saving");
@@ -219,7 +226,10 @@ export default function RefineApp({ project }: { project: Project }) {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refinements: refinementsRef.current }),
+        body: JSON.stringify({
+          refinements: payloadRef.current.refinements,
+          glossary: payloadRef.current.glossary,
+        }),
       });
       if (!res.ok) throw new Error("save failed");
       dirtyRef.current = false;
@@ -250,7 +260,10 @@ export default function RefineApp({ project }: { project: Project }) {
       void fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refinements: refinementsRef.current }),
+        body: JSON.stringify({
+          refinements: payloadRef.current.refinements,
+          glossary: payloadRef.current.glossary,
+        }),
         keepalive: true,
       });
     };
@@ -261,6 +274,14 @@ export default function RefineApp({ project }: { project: Project }) {
       window.removeEventListener("pagehide", pageHide);
     };
   }, [project.id]);
+
+  const handleGlossaryChange = useCallback(
+    (next: string[]) => {
+      setGlossary(next);
+      scheduleSave();
+    },
+    [scheduleSave]
+  );
 
   /* ---- 状態の導出（保存はしない。第3章 3.3） ---- */
   const statusOf = useCallback(
@@ -478,6 +499,13 @@ export default function RefineApp({ project }: { project: Project }) {
           </select>
         </label>
         <div className="spacer" />
+        <button
+          className={`btn btn-sm${glossaryOpen ? " btn-on" : ""}`}
+          onClick={() => setGlossaryOpen((v) => !v)}
+          aria-pressed={glossaryOpen}
+        >
+          {glossaryOpen ? "固有名詞を閉じる" : "固有名詞"}
+        </button>
         <span
           className={`save-state ${
             saveState === "saved" ? "saved" : saveState === "error" ? "error" : "dirty"
@@ -486,6 +514,12 @@ export default function RefineApp({ project }: { project: Project }) {
           {saveLabel}
         </span>
       </div>
+
+      {glossaryOpen ? (
+        <div className="drawer">
+          <GlossaryPanel glossary={glossary} onChange={handleGlossaryChange} />
+        </div>
+      ) : null}
 
       <div className="refine-table-scroll">
         <table className="refine-table">

@@ -24,7 +24,6 @@ import RawEditor from "./RawEditor";
 import TableView from "./TableView";
 import AudioBar from "./AudioBar";
 import ParticipantsPanel from "./ParticipantsPanel";
-import GlossaryPanel from "./GlossaryPanel";
 import ImportPanel from "./ImportPanel";
 import HelpModal from "./HelpModal";
 import ProjectNav from "./ProjectNav";
@@ -49,7 +48,6 @@ export default function EditorApp({
   const [mru, setMru] = useState<string[]>(project.mru);
   const [hints, setHints] = useState<number[]>(project.hints);
   const [audioMeta, setAudioMeta] = useState(project.audio);
-  const [glossary, setGlossary] = useState<string[]>(project.glossary);
   const [imported, setImported] = useState(project.imported);
   const [wordData, setWordData] = useState<ProjectWords | null>(words);
 
@@ -117,8 +115,8 @@ export default function EditorApp({
   /* ---- 保存 ---- */
   const dirtyRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const payloadRef = useRef({ title, rawText, participants, mru, audioMeta, glossary });
-  payloadRef.current = { title, rawText, participants, mru, audioMeta, glossary };
+  const payloadRef = useRef({ title, rawText, participants, mru, audioMeta });
+  payloadRef.current = { title, rawText, participants, mru, audioMeta };
   const firstRender = useRef(true);
 
   const save = useCallback(async () => {
@@ -133,7 +131,6 @@ export default function EditorApp({
           participants: payloadRef.current.participants,
           mru: payloadRef.current.mru,
           audio: payloadRef.current.audioMeta,
-          glossary: payloadRef.current.glossary,
         }),
       });
       if (!res.ok) throw new Error("save failed");
@@ -156,7 +153,7 @@ export default function EditorApp({
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [title, rawText, participants, mru, audioMeta, glossary, save]);
+  }, [title, rawText, participants, mru, audioMeta, save]);
 
   // 未保存のまま閉じようとしたら、送れるだけ送りつつ引き止める
   useEffect(() => {
@@ -174,7 +171,6 @@ export default function EditorApp({
           participants: payloadRef.current.participants,
           mru: payloadRef.current.mru,
           audio: payloadRef.current.audioMeta,
-          glossary: payloadRef.current.glossary,
         }),
         keepalive: true,
       });
@@ -771,51 +767,50 @@ export default function EditorApp({
 
       {drawerOpen ? (
         <div className="drawer">
-          <ol className="steps">
-            <li className={imported ? "done" : ""}>
-              <span className="num">{imported ? "✓" : "1"}</span>
-              <span>
-                WhisperX の JSON を取り込む
-                {imported ? "（済み）" : "（まずはここから）"}
-              </span>
-            </li>
-            <li className={participants.length > 0 ? "done" : ""}>
-              <span className="num">{participants.length > 0 ? "✓" : "2"}</span>
-              <span>
-                参加者を登録する（<kbd>@</kbd> の候補になります）
-              </span>
-            </li>
-            <li className={audioMeta ? "done" : ""}>
-              <span className="num">{audioMeta ? "✓" : "3"}</span>
-              <span>
-                音声ファイルを取り込む（任意。聞きながら編集できます）
-                {audioMeta ? `　${audioMeta.name}（${formatBytes(audioMeta.size)}）` : ""}
-              </span>
-            </li>
-            <li>
-              <span className="num">4</span>
-              <span>
-                左側で <kbd>@</kbd> 話者、<kbd>--</kbd> 区切り、<kbd>#</kbd>{" "}
-                議題見出しを付けていく。Word へのコピーは、上部の「出力」画面から行います。
-              </span>
-            </li>
-          </ol>
+          {/* 上段は2列。左＝何をすればよいか、右＝最初の作業である JSON 取り込み */}
+          <div className="drawer-top">
+            <ol className="steps">
+              <li className={imported ? "done" : ""}>
+                <span className="num">{imported ? "✓" : "1"}</span>
+                <span>
+                  WhisperX の JSON を取り込む
+                  {imported ? "（済み）" : "（まずはここから）"}
+                </span>
+              </li>
+              <li className={participants.length > 0 ? "done" : ""}>
+                <span className="num">{participants.length > 0 ? "✓" : "2"}</span>
+                <span>
+                  参加者を登録する（<kbd>@</kbd> の候補になります）
+                </span>
+              </li>
+              <li className={audioMeta ? "done" : ""}>
+                <span className="num">{audioMeta ? "✓" : "3"}</span>
+                <span>
+                  音声ファイルを取り込む（任意。聞きながら編集できます）
+                  {audioMeta ? `　${audioMeta.name}（${formatBytes(audioMeta.size)}）` : ""}
+                </span>
+              </li>
+              <li>
+                <span className="num">4</span>
+                <span>
+                  左側で <kbd>@</kbd> 話者、<kbd>--</kbd> 区切り、<kbd>#</kbd>{" "}
+                  議題見出しを付けていく。Word へのコピーは、上部の「出力」画面から行います。
+                </span>
+              </li>
+            </ol>
 
-          <hr style={{ border: 0, borderTop: "1px solid var(--border)", margin: "14px 0" }} />
-          <ImportPanel
-            projectId={project.id}
-            imported={imported}
-            onImported={handleImported}
-          />
+            <ImportPanel
+              projectId={project.id}
+              imported={imported}
+              onImported={handleImported}
+            />
+          </div>
 
           <hr style={{ border: 0, borderTop: "1px solid var(--border)", margin: "14px 0" }} />
           <ParticipantsPanel
             participants={participants}
             onChange={setParticipants}
           />
-
-          <hr style={{ border: 0, borderTop: "1px solid var(--border)", margin: "14px 0" }} />
-          <GlossaryPanel glossary={glossary} onChange={setGlossary} />
         </div>
       ) : null}
 

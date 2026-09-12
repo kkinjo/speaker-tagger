@@ -635,6 +635,37 @@ table.minutes tr.row-todo td.speaker {
   padding: 12px 16px;
 }
 
+/* ドロワー上段。左＝手順、右＝JSON 取り込み。
+   狭いときは1列に落ちる */
+.drawer-top {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+/* 2列に並べたときは、左右の先頭行の高さを揃える */
+.drawer-top .steps {
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .drawer-top {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}
+
+/* 取り込み方の指定。ドロップエリアの直上に1行で置く */
+.import-option {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  margin: 8px 0 6px;
+  white-space: nowrap;
+}
+
 .participant-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
