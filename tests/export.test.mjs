@@ -116,7 +116,10 @@ export default async function run() {
     // --- 整文結果があればそちらを使う ---
     await page.goto(editorUrl + "/refine");
     await page.waitForSelector("table.refine-table");
+    // 「一括変換」は毎回、件数確認モーダルを挟む（整文画面の仕様）
     await page.getByRole("button", { name: "一括変換" }).click();
+    await page.waitForSelector(".confirm-modal");
+    await page.getByRole("button", { name: "実行" }).click();
     await page.waitForFunction(
       () => document.querySelectorAll(".refine-status-done").length >= 9,
       null,

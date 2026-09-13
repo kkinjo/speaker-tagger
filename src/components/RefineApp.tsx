@@ -6,6 +6,7 @@ import type { PromptPreset } from "@/lib/refine";
 import { parseDoc, type Block } from "@/editor/parse";
 import { blockSourceKey } from "@/editor/refine";
 import { requestRefine, RefineRequestError } from "@/editor/refineClient";
+import ConfirmModal from "./ConfirmModal";
 import GlossaryPanel from "./GlossaryPanel";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
@@ -215,6 +216,17 @@ export default function RefineApp({
   );
   /** 直近の失敗の内容。理由が分からないまま「失敗」だけが並ぶのを避ける */
   const [lastError, setLastError] = useState<string | null>(null);
+  /**
+   * 一括変換の件数確認モーダル。値は対象件数。null なら閉じている。
+   * 手動修正済みの上書きが絡む場合はこちらではなく `pendingOverwrite` を使う
+   * （両方の条件を満たすときは上書き確認モーダルだけを出す。連続して
+   * モーダルを2つ出さない）。
+   */
+  const [pendingBulkCount, setPendingBulkCount] = useState<number | null>(null);
+  /** 手動修正済みの上書き確認モーダル。null なら閉じている */
+  const [pendingOverwrite, setPendingOverwrite] = useState<
+    { kind: "bulk"; editedCount: number } | { kind: "retry"; block: Block } | null
+  >(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const undoNoticeRef = useRef(undoNotice);
   undoNoticeRef.current = undoNotice;
@@ -453,84 +465,131 @@ export default function RefineApp({
     []
   );
 
-  /* ---- 個別再変換（第4章 4.5） ---- */
-  const handleRetry = useCallback(
-    (block: Block) => {
-      const key = blockSourceKey(block);
-      if (refinements[key]?.edited) {
-        const ok = window.confirm(
-          "この行は手動で修正済みです。上書きして再変換しますか？"
-        );
-        if (!ok) return;
-      }
-      setLastError(null);
-      // 固有名詞・プリセットの変更が未保存なら先に送る（サーバーが読むのは保存済みの値）
-      void flushSave().then(() => refineOne(block));
-    },
-    [refinements, refineOne, flushSave]
+  /**
+   * 一括変換の対象を求める。
+   *
+   * `includeEdited` は「手動修正済みの行も含めるか」。上書き確認モーダルで
+   * 実行が押されたあとにだけ true で呼ぶ。false のときは対象外（保護）。
+   */
+  const computeBulkTargets = useCallback(
+    (includeEdited: boolean) =>
+      utteranceBlocks.filter((b) => {
+        const r = refinements[blockSourceKey(b)];
+        if (!r) return true; // 未変換は常に対象
+        if (r.edited) return overwriteDone && includeEdited;
+        return overwriteDone; // 変換済み（未編集）
+      }),
+    [utteranceBlocks, refinements, overwriteDone]
   );
 
-  /* ---- 一括変換（第4章 4.3） ---- */
-  const runBulk = useCallback(async () => {
-    const editedAmongTargets = overwriteDone
-      ? utteranceBlocks.filter((b) => refinements[blockSourceKey(b)]?.edited)
-      : [];
+  /**
+   * 一括変換を実際に実行する。件数確認・上書き確認のモーダルを経由した
+   * あとに呼ばれる（第4章 4.3。確認モーダルは AI の上書きを人が必ず承認する運用に合わせた追加仕様）。
+   */
+  const executeBulk = useCallback(
+    async (targets: Block[]) => {
+      if (targets.length === 0) return;
 
-    let includeEdited = false;
-    if (editedAmongTargets.length > 0) {
-      includeEdited = window.confirm(
-        `手動修正済みの行が ${editedAmongTargets.length} 件あります。\n` +
-          "これらも上書きしてやり直しますか？\n" +
-          "（OK: 上書きする / キャンセル: 手動修正済みの行は保護して進める）"
-      );
-    }
+      // 登録・切り替えたばかりの固有名詞とプリセットで変換されるよう、保存を先に済ませる
+      await flushSave();
 
-    const targets = utteranceBlocks.filter((b) => {
-      const r = refinements[blockSourceKey(b)];
-      if (!r) return true; // 未変換は常に対象
-      if (r.edited) return overwriteDone && includeEdited;
-      return overwriteDone; // 変換済み（未編集）
-    });
-
-    if (targets.length === 0) return;
-
-    // 登録・切り替えたばかりの固有名詞とプリセットで変換されるよう、保存を先に済ませる
-    await flushSave();
-
-    abortRef.current = false;
-    setLastError(null);
-    setRunning(true);
-    for (const block of targets) {
-      if (abortRef.current) break;
-
-      let outcome = await refineOne(block);
-
-      // 429（レート制限・利用上限）はリトライせず即座にループを停止する。
-      // 上限に達している可能性があり、叩き続けると状況が悪化する（第5.5章）
-      if (!outcome.ok && outcome.error.isRateLimited) {
-        setLastError(
-          `レート制限または利用上限に達したため中断しました。しばらく待ってから再開してください。（${outcome.error.message}）`
-        );
-        break;
-      }
-
-      // 5xx・接続失敗は1回だけリトライする（第5.5章）
-      if (!outcome.ok && outcome.error.isRetryable) {
+      abortRef.current = false;
+      setLastError(null);
+      setRunning(true);
+      for (const block of targets) {
         if (abortRef.current) break;
-        outcome = await refineOne(block);
+
+        let outcome = await refineOne(block);
+
+        // 429（レート制限・利用上限）はリトライせず即座にループを停止する。
+        // 上限に達している可能性があり、叩き続けると状況が悪化する（第5.5章）
         if (!outcome.ok && outcome.error.isRateLimited) {
           setLastError(
             `レート制限または利用上限に達したため中断しました。しばらく待ってから再開してください。（${outcome.error.message}）`
           );
           break;
         }
-      }
 
-      // それでも失敗した行は「失敗」のまま次へ進む。
-      // 復旧は個別再変換ボタンから行う（第5.5章）
+        // 5xx・接続失敗は1回だけリトライする（第5.5章）
+        if (!outcome.ok && outcome.error.isRetryable) {
+          if (abortRef.current) break;
+          outcome = await refineOne(block);
+          if (!outcome.ok && outcome.error.isRateLimited) {
+            setLastError(
+              `レート制限または利用上限に達したため中断しました。しばらく待ってから再開してください。（${outcome.error.message}）`
+            );
+            break;
+          }
+        }
+
+        // それでも失敗した行は「失敗」のまま次へ進む。
+        // 復旧は個別再変換ボタンから行う（第5.5章）
+      }
+      setRunning(false);
+    },
+    [refineOne, flushSave]
+  );
+
+  /* ---- 個別再変換（第4章 4.5） ---- */
+  const runRetry = useCallback(
+    (block: Block) => {
+      setLastError(null);
+      // 固有名詞・プリセットの変更が未保存なら先に送る（サーバーが読むのは保存済みの値）
+      void flushSave().then(() => refineOne(block));
+    },
+    [refineOne, flushSave]
+  );
+
+  const handleRetry = useCallback(
+    (block: Block) => {
+      const key = blockSourceKey(block);
+      if (refinements[key]?.edited) {
+        // 手動修正済みの行を上書きする前に必ず確認する。
+        // 修正済みでない行はここを通らず、即座に実行する（現状維持）
+        setPendingOverwrite({ kind: "retry", block });
+        return;
+      }
+      runRetry(block);
+    },
+    [refinements, runRetry]
+  );
+
+  /* ---- 一括変換（第4章 4.3） ---- */
+  const startBulk = useCallback(() => {
+    // チェックがオンで、かつ手動修正済みの行が対象に含まれる場合は、
+    // 上書き確認モーダルだけを出す。件数確認モーダルは出さない（連続してモーダルを2つ出さない）
+    const editedAmongTargets = overwriteDone
+      ? utteranceBlocks.filter((b) => refinements[blockSourceKey(b)]?.edited)
+      : [];
+    if (editedAmongTargets.length > 0) {
+      setPendingOverwrite({ kind: "bulk", editedCount: editedAmongTargets.length });
+      return;
     }
-    setRunning(false);
-  }, [utteranceBlocks, refinements, overwriteDone, refineOne, flushSave]);
+
+    // 手動修正済みが絡まない場合は、いつも通り件数確認モーダルを出す。
+    // 対象が無ければモーダルも出さず何もしない（従来どおり）
+    const targets = computeBulkTargets(false);
+    if (targets.length === 0) return;
+    setPendingBulkCount(targets.length);
+  }, [utteranceBlocks, refinements, overwriteDone, computeBulkTargets]);
+
+  /** 件数確認モーダルで「実行」を押した */
+  const confirmBulkCount = useCallback(() => {
+    setPendingBulkCount(null);
+    void executeBulk(computeBulkTargets(false));
+  }, [computeBulkTargets, executeBulk]);
+
+  /** 上書き確認モーダルで「実行」を押した（一括・個別の両方をここで受ける） */
+  const confirmOverwrite = useCallback(() => {
+    const pending = pendingOverwrite;
+    setPendingOverwrite(null);
+    if (!pending) return;
+    if (pending.kind === "bulk") {
+      void executeBulk(computeBulkTargets(true));
+    } else {
+      runRetry(pending.block);
+    }
+  }, [pendingOverwrite, computeBulkTargets, executeBulk, runRetry]);
 
   const abort = useCallback(() => {
     abortRef.current = true;
@@ -556,7 +615,7 @@ export default function RefineApp({
             中断
           </button>
         ) : (
-          <button className="btn btn-sm btn-primary" onClick={() => void runBulk()}>
+          <button className="btn btn-sm btn-primary" onClick={startBulk}>
             一括変換
           </button>
         )}
@@ -700,6 +759,31 @@ export default function RefineApp({
             取り消す
           </button>
         </div>
+      ) : null}
+
+      {/* 一括変換の件数確認モーダル。実行を押すまで変換は始まらない */}
+      {pendingBulkCount !== null ? (
+        <ConfirmModal
+          message={`${pendingBulkCount}件を一括変換します。よろしいですか？`}
+          onCancel={() => setPendingBulkCount(null)}
+          onConfirm={confirmBulkCount}
+        />
+      ) : null}
+
+      {/* 手動修正済みの上書き確認モーダル。一括・個別のどちらもここで受ける。
+          一括で件数確認モーダルとの両方に該当する場合は、こちらだけを出す
+          （startBulk 側で制御。連続してモーダルを2つ出さない） */}
+      {pendingOverwrite ? (
+        <ConfirmModal
+          danger
+          message={
+            pendingOverwrite.kind === "bulk"
+              ? `このうち${pendingOverwrite.editedCount}件は手動で修正済みです。上書きすると修正内容は失われます。よろしいですか？`
+              : "この行は手動で修正済みです。上書きすると修正内容は失われます。よろしいですか？"
+          }
+          onCancel={() => setPendingOverwrite(null)}
+          onConfirm={confirmOverwrite}
+        />
       ) : null}
     </div>
   );

@@ -820,6 +820,28 @@ table.minutes tr.row-done td.speaker {
   line-height: 1.8;
 }
 
+/* ---------- 確認モーダル（ConfirmModal） ---------- */
+
+.confirm-modal {
+  max-width: 420px;
+  padding: 24px;
+  display: grid;
+  gap: 20px;
+}
+
+.confirm-modal-message {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .key-table {
   border-collapse: collapse;
   width: 100%;
