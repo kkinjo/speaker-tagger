@@ -174,7 +174,11 @@ export async function refine(args: RefineArgs): Promise<string> {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1024,
+        // 長い発言（4,000字程度）でも打ち切られないよう余裕を持たせる。
+        // 1024 では長い発言の出力が途中で切れ、気づかれないまま保存される
+        // 事故があった。日本語は 1 トークンに複数文字が入ることが多いとはいえ、
+        // 安全側に振って余裕を持たせてある
+        max_tokens: 8192,
         // 1発言ずつ逐次処理するため、system 部分はほぼ毎回キャッシュヒットする
         system: [
           {
@@ -207,6 +211,23 @@ export async function refine(args: RefineArgs): Promise<string> {
     .map((b: { text: string }) => b.text)
     .join("")
     .trim();
+
+  /**
+   * max_tokens に達して打ち切られた応答は、成功扱いにしない。
+   *
+   * この場合 res.ok は true（API としては正常応答）で、`text` には
+   * 文の途中で切れた内容が入っている。気づかれないまま保存されると
+   * 議事録が欠けたまま確定してしまうため、呼び出し側（一括変換ループ）に
+   * 「失敗」として扱わせる。429 でも 5xx でもない、専用のステータスにして
+   * 429（ループ停止）にも 5xx（1回だけリトライ）にも解釈されないようにする。
+   * 同じ入力を再送しても打ち切りは再発しやすいため、リトライはしない。
+   */
+  if (data.stop_reason === "max_tokens") {
+    throw new RefineError(
+      "出力が長すぎて途中で切れました（発言が長すぎる可能性があります）",
+      422,
+    );
+  }
 
   if (!text) {
     throw new RefineError("整文結果が空でした");

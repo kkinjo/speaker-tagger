@@ -7,7 +7,8 @@ import { setStubMode, stubCalls } from "./anthropicStub.mjs";
  *
  * 整文は `/api/refine` 経由で Anthropic API を呼ぶ。テストでは本物の API では
  * なくスタブ（tests/anthropicStub.mjs）に向け、成功時は「原文 + (ダミー整文)」を
- * 返させる。429 / 5xx を意図して起こし、第5.5章のエラー処理も確認する。
+ * 返させる。429 / 5xx / max_tokens（出力が途中で打ち切られた場合）を意図して
+ * 起こし、第5.5章のエラー処理も確認する。
  */
 export default async function run() {
   const files = buildFixtures();
@@ -348,6 +349,65 @@ export default async function run() {
       "失敗した行は個別再変換ボタンから復旧できる",
       (await page.locator(".refine-status-done").count()) === 1 &&
         (await page.locator(".refine-status-error").count()) === errorRows - 1
+    );
+
+    /* ---- max_tokens で打ち切られた場合は失敗として扱う ---- */
+    // 429/5xx とは別プロジェクトで確認する（前段の失敗・復旧の状態と混ざらないように）
+    const truncUrl = await createProject(page, "max_tokens のテスト");
+    await importJson(page, files.sample);
+    await page.waitForFunction(
+      () => document.querySelector(".save-state")?.textContent?.includes("保存済み"),
+      null,
+      { timeout: 8000 }
+    );
+    await page.goto(truncUrl + "/refine");
+    await page.waitForSelector("table.refine-table");
+    const truncRows = await page
+      .locator("table.refine-table tbody tr:not(.refine-heading-row)")
+      .count();
+
+    await setStubMode("max_tokens");
+    await page.getByRole("button", { name: "一括変換" }).click();
+    await page.waitForFunction(
+      (total) => document.querySelectorAll(".refine-status-error").length >= total,
+      truncRows,
+      { timeout: 30000 }
+    );
+    await page.waitForTimeout(300);
+    const callsAfterTruncated = await stubCalls();
+    r.check(
+      "max_tokens で打ち切られた応答は成功扱いにせず、行を「失敗」にする",
+      (await page.locator(".refine-status-error").count()) === truncRows
+    );
+    r.check(
+      "429 とは違い、途中で止まらず最後の行まで処理する",
+      (await page.locator(".refine-status-empty").count()) === 0
+    );
+    r.check(
+      "max_tokens はリトライしない（1行あたり1回。5xx と違い再送しても再発しやすいため）",
+      callsAfterTruncated === truncRows,
+      `calls=${callsAfterTruncated} rows=${truncRows}`
+    );
+    r.check(
+      "失敗理由に「出力が途中で切れた」旨が出る",
+      ((await page.locator(".refine-error-note").textContent()) ?? "").includes("切れ")
+    );
+
+    // 個別再変換から復旧できる（第5.5章）
+    await setStubMode("ok");
+    await page
+      .locator("table.refine-table tbody tr:not(.refine-heading-row)")
+      .first()
+      .locator('button[title^="この行を再変換"]')
+      .click();
+    await page.waitForFunction(
+      () => document.querySelectorAll(".refine-status-done").length === 1,
+      null,
+      { timeout: 10000 }
+    );
+    r.check(
+      "打ち切られて失敗した行も個別再変換ボタンから復旧できる",
+      (await page.locator(".refine-status-done").count()) === 1
     );
 
     /* ---- プリセット（第5.4章 / 文体の切り替え） ---- */

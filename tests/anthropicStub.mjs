@@ -10,7 +10,9 @@ import http from "node:http";
  * 応答の内容は、これまでのダミー実装と同じ「原文 + (ダミー整文)」にしてある。
  *
  * 制御用のエンドポイント:
- * - `POST /__mode` `{ "mode": "ok" | "429" | "500" }` … 応答の種類を変え、回数を 0 に戻す
+ * - `POST /__mode` `{ "mode": "ok" | "429" | "500" | "max_tokens" }` …
+ *   応答の種類を変え、回数を 0 に戻す。`max_tokens` は出力が途中で
+ *   打ち切られた場合（本文が半分だけ返り、`stop_reason: "max_tokens"` が付く）を再現する
  * - `GET  /__stats` … `{ "calls": n }`。リトライ回数の確認に使う
  */
 
@@ -81,8 +83,21 @@ export async function startStub() {
 
     const payload = JSON.parse((await readBody(req)) || "{}");
     await new Promise((resolve) => setTimeout(resolve, RESPONSE_DELAY_MS));
+
+    if (mode === "max_tokens") {
+      // 本文の途中で打ち切られた状態を再現する。src/lib/refine.ts は
+      // stop_reason だけを見て判定するので、本文の中身自体はダミーでよい
+      const body = targetBody(payload);
+      const truncated = body.slice(0, Math.max(1, Math.floor(body.length / 2)));
+      return json(200, {
+        content: [{ type: "text", text: truncated }],
+        stop_reason: "max_tokens",
+      });
+    }
+
     return json(200, {
       content: [{ type: "text", text: `${targetBody(payload)}(ダミー整文)` }],
+      stop_reason: "end_turn",
     });
   });
 

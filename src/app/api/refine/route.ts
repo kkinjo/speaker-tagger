@@ -63,6 +63,8 @@ export async function POST(req: Request) {
     if (e instanceof RefineError && e.status) {
       // 429 はクライアント側でループを停止させる。リトライはしない（第5.5章）
       // 5xx はクライアント側で1回だけリトライする
+      // 422 は max_tokens で打ち切られた場合。リトライしても再発しやすいため、
+      // クライアント側では1回で「失敗」にして次の行へ進む
       console.error("[refine]", e.message);
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
