@@ -24,9 +24,13 @@ export const STUB_API_URL = `${STUB_BASE}/v1/messages`;
  * 応答を少し遅らせる。
  * 同一ホストのスタブは数ミリ秒で返るため、遅延が無いと数百行が一瞬で
  * 終わってしまい、「中断」ボタンや「変換中」表示の動作を確認できない。
- * 本物の API 呼び出しに近い体感にするための値。
+ *
+ * 中断のテストが使う大きめの入力は同じ文を繰り返しており、整文結果は本文の
+ * ハッシュ（sourceKey）で共有される。つまり数回の応答で数百行が「変換済み」に
+ * なるため、中断が間に合うだけの遅延がいる。これまでのダミー実装（40〜100ms、
+ * 平均 70ms）と同じ体感になるようにしてある。
  */
-const RESPONSE_DELAY_MS = 25;
+const RESPONSE_DELAY_MS = 70;
 
 function readBody(req) {
   return new Promise((resolve, reject) => {

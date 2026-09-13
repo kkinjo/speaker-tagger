@@ -26,8 +26,12 @@ async function reachable() {
 
 async function startServer() {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "speaker-tagger-test-"));
+  // `npx next start` は子プロセス（next-server）を生むので、プロセスグループごと
+  // 起動しておく。親だけを kill すると next-server がポートを掴んだまま残り、
+  // 次回の実行が「既に動いているサーバー」としてそれを使い回してしまう
   server = spawn("npx", ["next", "start", "-p", port], {
     stdio: "ignore",
+    detached: true,
     env: {
       ...process.env,
       APP_SECRET: "test-secret",
@@ -88,7 +92,13 @@ try {
     if (!(await run())) allPassed = false;
   }
 } finally {
-  if (server) server.kill("SIGKILL");
+  if (server) {
+    try {
+      process.kill(-server.pid, "SIGKILL");
+    } catch {
+      server.kill("SIGKILL");
+    }
+  }
   if (stub) stub.close();
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
 }

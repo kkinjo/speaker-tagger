@@ -136,23 +136,6 @@ const API_URL = process.env.REFINE_API_URL ?? "https://api.anthropic.com/v1/mess
 /** 既定は Claude Sonnet 5。コスト優先なら環境変数で Haiku 4.5 に切り替える（第5.2章） */
 const MODEL = process.env.REFINE_MODEL ?? "claude-sonnet-5";
 
-/**
- * 前置きの混入を防ぐための assistant prefill（空文字）。
- *
- * 【既定で無効。理由】
- * assistant prefill は Claude Sonnet 5 / Opus 5 および 4.6〜4.8 系で廃止され、
- * 送ると 400 が返る。つまり既定モデル（claude-sonnet-5）では整文が全件失敗する。
- * 加えて prefill は「応答の書き出しを固定する」仕組みなので、空文字では
- * 固定する文字が無く、prefill が使えるモデルでも前置き対策として働かない。
- *
- * 前置きの抑止は buildSystemPrompt() の「## 出力形式」に移してある。
- *
- * 消さずに残しているのは、prefill を受け付ける旧モデル（Haiku 4.5 等）を
- * REFINE_MODEL で指定して試す余地を残すため。その場合だけ
- * `REFINE_ASSISTANT_PREFILL=1` を設定する。
- */
-const SEND_ASSISTANT_PREFILL = process.env.REFINE_ASSISTANT_PREFILL === "1";
-
 export type RefineArgs = {
   body: string;
   prevBody?: string;
@@ -180,13 +163,6 @@ export async function refine(args: RefineArgs): Promise<string> {
     participants: args.participants,
   });
 
-  const messages: Array<{ role: "user" | "assistant"; content: string }> = [
-    { role: "user", content: buildUserPrompt(args) },
-  ];
-  if (SEND_ASSISTANT_PREFILL) {
-    messages.push({ role: "assistant", content: "" });
-  }
-
   let res: Response;
   try {
     res = await fetch(API_URL, {
@@ -207,7 +183,9 @@ export async function refine(args: RefineArgs): Promise<string> {
             cache_control: { type: "ephemeral" },
           },
         ],
-        messages,
+        // assistant prefill は使わない。Claude Sonnet 5 以降では廃止されており、
+        // 送ると 400 が返る。前置きの抑止は system プロンプト側で行う
+        messages: [{ role: "user", content: buildUserPrompt(args) }],
       }),
     });
   } catch (e) {
