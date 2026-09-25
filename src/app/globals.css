@@ -266,12 +266,7 @@ textarea:focus {
 .project-row .title {
   font-weight: 600;
   font-size: 15px;
-  text-decoration: none;
   color: var(--fg);
-}
-
-.project-row .title:hover {
-  text-decoration: underline;
 }
 
 .badge {
@@ -875,25 +870,41 @@ table.minutes tr.row-done td.speaker {
 .project-nav {
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+.screen-links {
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
 }
 
-.project-nav-link {
-  padding: 4px 10px;
+/*
+ * 画面を移るリンクを、ブラウザ標準のボタンと同じ見た目にする。
+ * 移動はリンクのまま（戻る・新しいタブで開く、が効く）にしたいので <a> を使い、
+ * 独自の色ではなく CSS のシステムカラー（ButtonFace など）で OS/ブラウザの
+ * ボタンの見た目に合わせる（「共通パーツ」の方針どおり、装飾は足さない）。
+ */
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
   font-size: 13px;
-  color: var(--fg);
+  line-height: 1.5;
+  white-space: nowrap;
   text-decoration: none;
+  color: ButtonText;
+  background: ButtonFace;
+  border: 1px solid ButtonBorder;
+  border-radius: 3px;
 }
 
-.project-nav-link:hover {
-  text-decoration: underline;
-}
-
-/* 現在地は色を変えずに、太字とテキストだけで示す（リンクにしない） */
-.project-nav-current {
-  padding: 4px 10px;
-  font-size: 13px;
+/* 現在地はリンクにせず、選択中の見た目（背景の薄い色＋太字）で示す（.btn-on と同じ考え方） */
+.link-btn-current {
+  background: var(--accent-soft);
+  border-color: var(--border-strong);
   font-weight: 700;
+  cursor: default;
 }
 
 .stub-page {

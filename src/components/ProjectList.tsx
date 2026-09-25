@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ProjectSummary } from "@/lib/types";
 import { deleteAudio, hasStoredAudio } from "@/editor/audioStore";
+import { ScreenLinks } from "./ProjectNav";
 
 function formatDate(ms: number): string {
   const d = new Date(ms);
@@ -122,15 +123,9 @@ export default function ProjectList({
           <div className="project-list">
             {projects.map((p) => (
               <div className="project-row" key={p.id}>
-                <a className="title" href={`/projects/${p.id}`}>
-                  {p.title}
-                </a>
-                <a className="project-nav-link" href={`/projects/${p.id}/refine`}>
-                  整文
-                </a>
-                <a className="project-nav-link" href={`/projects/${p.id}/export`}>
-                  出力
-                </a>
+                {/* 会議名はリンクにしない。どの画面を開くかは番号付きのボタンで選ぶ */}
+                <span className="title">{p.title}</span>
+                <ScreenLinks projectId={p.id} />
                 {storedAudio.has(p.id) ? <span className="badge">音声あり</span> : null}
                 <div className="spacer" />
                 <span className="muted" style={{ fontSize: 12 }}>
