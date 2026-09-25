@@ -346,6 +346,49 @@ export default async function run() {
       "ピッカー表示中にクリックでカーソルを動かすと閉じる",
       (await page.locator(".suggest").count()) === 0
     );
+
+    /* ---- 同じ行の右側をクリックしても閉じる（上書きしない） ---- */
+    // 日本語は語の間に空白が無いので、同じ行の右側は同じ `@…` の続きに見える。
+    // 開いたまま Enter を押すと、`@` からクリック位置までが候補で上書きされていた
+    await page.evaluate(() => {
+      const ta = document.querySelector("textarea.editor-input");
+      document.querySelector(".editor-scroll").scrollTop = 0;
+      ta.focus();
+      ta.setSelectionRange(0, 0);
+      document.execCommand("insertText", false, "藤です。よろしくお願いします。\n");
+      ta.setSelectionRange(0, 0);
+    });
+    await page.keyboard.type("@佐"); // 「佐藤」が候補に残る状態
+    await page.waitForSelector(".suggest", { timeout: 3000 });
+    const target = await page.evaluate(() => {
+      const inner = document.querySelector(".editor-inner").getBoundingClientRect();
+      const mirror = document.querySelector(".editor-mirror");
+      mirror.textContent = "";
+      const marker = document.createElement("span");
+      marker.textContent = "\u200b";
+      mirror.appendChild(marker);
+      const y = inner.top + marker.offsetTop + marker.offsetHeight / 2;
+      mirror.textContent = "";
+      return { x: inner.left + 500, y };
+    });
+    await page.mouse.click(target.x, target.y);
+    await page.waitForTimeout(200);
+    const clickedCaret = await page.evaluate(
+      () => document.querySelector("textarea.editor-input").selectionStart
+    );
+    r.check(
+      "同じ行の右側をクリックすると閉じる",
+      clickedCaret > 2 && (await page.locator(".suggest").count()) === 0,
+      `caret=${clickedCaret}`
+    );
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(200);
+    const line = await page.locator("textarea.editor-input").inputValue();
+    r.check(
+      "そこで Enter を押しても、@ からクリック位置までは上書きされない",
+      line.startsWith("@佐藤です。よろしくお願いします。") && !line.includes("@●●小/佐藤"),
+      JSON.stringify(line.slice(0, 24))
+    );
   } finally {
     await browser.close();
   }

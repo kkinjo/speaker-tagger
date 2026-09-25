@@ -240,6 +240,20 @@ export default function RawEditor({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // IME で変換中のキー（変換確定の Enter など）は IME に任せる
+    if (e.nativeEvent.isComposing || composingRef.current) return;
+    // 念のための安全策：カーソルが候補を開いた位置から動いていたら
+    // （マウス・トラックパッド・IME などで閉じる処理をすり抜けた場合）、
+    // Enter や ↑↓ を候補の操作に使わず、閉じて普通のキーとして通す。
+    // 通してしまうと `@` から今のカーソル位置までが候補で上書きされる
+    const ta = e.currentTarget;
+    if (
+      suggest.open &&
+      (ta.selectionStart !== ta.selectionEnd || ta.selectionStart !== typedCaretRef.current)
+    ) {
+      setSuggest(CLOSED);
+      return;
+    }
     if (!suggest.open || candidates.length === 0) {
       if (suggest.open && e.key === "Escape") {
         e.preventDefault();
