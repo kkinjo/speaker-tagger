@@ -73,6 +73,7 @@ const suites = [
   ["sourceKey", "./sourceKey.test.mjs"],
   ["normalizeProject", "./normalizeProject.test.mjs"],
   ["編集", "./editor.test.mjs"],
+  ["話者ピッカー", "./picker.test.mjs"],
   ["音声連動", "./audio.test.mjs"],
   ["スクロール連動", "./scrollsync.test.mjs"],
   ["画面ナビゲーション", "./nav.test.mjs"],

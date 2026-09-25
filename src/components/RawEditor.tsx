@@ -57,8 +57,18 @@ export default function RawEditor({
   scrollRef,
 }: Props) {
   const mirrorRef = useRef<HTMLDivElement>(null);
+  const suggestRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
   const [suggest, setSuggest] = useState<SuggestState>(CLOSED);
+  /**
+   * Escape で閉じた `@` の位置。同じ `@` の入力が続いている間は開き直さない。
+   *
+   * Escape は keydown で閉じるが、そのあとの keyup で refreshSuggest が走り、
+   * カーソルがまだ `@…` の直後にあるため即座に開き直してしまっていた。
+   * 結果として Escape が効かず、上下キーも候補選択に取られたままになる。
+   * カーソルがその `@` から離れたら（改行・空白をまたぐ、`@` を消すなど）解除する。
+   */
+  const dismissedStartRef = useRef<number | null>(null);
 
   // テキストエリアは非制御。React に value を渡すと、更新のたびに
   // textarea の defaultValue が入れ直され、長い議事録では本文全体の
@@ -116,9 +126,16 @@ export default function RawEditor({
           ? activeMentionQuery(ta.value, caret)
           : null;
       if (!found || participants.length === 0) {
+        dismissedStartRef.current = null;
         setSuggest((s) => (s.open ? CLOSED : s));
         return;
       }
+      // Escape で閉じた書きかけの `@` は、未登録の @ と同じく本文として残す
+      if (found.start === dismissedStartRef.current) {
+        setSuggest((s) => (s.open ? CLOSED : s));
+        return;
+      }
+      dismissedStartRef.current = null;
       const mirror = mirrorRef.current;
       const pos = mirror
         ? caretPosition(mirror, ta.value, found.start)
@@ -134,6 +151,30 @@ export default function RawEditor({
     },
     [participants.length]
   );
+
+  /**
+   * ピッカーが開いた瞬間に1回だけ、候補全体が見えるまで左ペインを
+   * スクロールする。画面の下のほうで `@` を打つと候補がはみ出すため。
+   *
+   * 依存は open と start だけにしてある。絞り込みで候補や query が
+   * 変わって再描画されても、ここは再発火させない。
+   * 左右のスクロール連動はそのまま効く（右ペインも一緒に動いてよい）。
+   */
+  useLayoutEffect(() => {
+    if (!suggest.open) return;
+    const box = suggestRef.current;
+    const scroller = scrollRef.current;
+    if (!box || !scroller) return;
+    const MARGIN = 8;
+    const boxRect = box.getBoundingClientRect();
+    const viewRect = scroller.getBoundingClientRect();
+    const overflow = boxRect.bottom + MARGIN - viewRect.bottom;
+    if (overflow <= 0) return;
+    // 候補の上端（＝入力中の行のすぐ下）が画面上端より上へ行くほどは動かさない
+    const room = boxRect.top - MARGIN - viewRect.top;
+    const delta = Math.min(overflow, Math.max(0, room));
+    if (delta > 0) scroller.scrollTop += delta;
+  }, [suggest.open, suggest.start, scrollRef]);
 
   const commit = useCallback(
     (participant: Participant) => {
@@ -154,11 +195,17 @@ export default function RawEditor({
     [onUseSpeaker, suggest.start, textareaRef]
   );
 
+  /** Escape でピッカーを閉じる。以降、上下キーは本文のカーソル移動に戻る */
+  function dismissSuggest() {
+    dismissedStartRef.current = suggest.start;
+    setSuggest(CLOSED);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (!suggest.open || candidates.length === 0) {
       if (suggest.open && e.key === "Escape") {
         e.preventDefault();
-        setSuggest(CLOSED);
+        dismissSuggest();
       }
       return;
     }
@@ -176,7 +223,7 @@ export default function RawEditor({
       commit(candidates[Math.min(suggest.index, candidates.length - 1)]);
     } else if (e.key === "Escape") {
       e.preventDefault();
-      setSuggest(CLOSED);
+      dismissSuggest();
     }
   }
 
@@ -224,6 +271,7 @@ export default function RawEditor({
 
         {suggest.open ? (
           <div
+            ref={suggestRef}
             className="suggest"
             style={{ top: suggest.top, left: suggest.left }}
             // 候補クリックでテキストエリアのフォーカスが外れないようにする
