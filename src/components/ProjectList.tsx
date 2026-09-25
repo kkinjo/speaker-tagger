@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ProjectSummary } from "@/lib/types";
-import { deleteAudio } from "@/editor/audioStore";
+import { deleteAudio, hasStoredAudio } from "@/editor/audioStore";
 
 function formatDate(ms: number): string {
   const d = new Date(ms);
@@ -24,6 +24,25 @@ export default function ProjectList({
   const [projects, setProjects] = useState(initial);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  /**
+   * このブラウザに音声の本体が保存されている議事録。
+   * サーバーの「音声あり」はファイル名の記録にすぎず、本体はブラウザごとに
+   * 保存しているため、別の端末・ブラウザでは無いことがある。
+   * 「音声あり」は、このブラウザで実際に再生できるものにだけ付ける。
+   */
+  const [storedAudio, setStoredAudio] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    const withAudio = projects.filter((p) => p.hasAudio);
+    void Promise.all(
+      withAudio.map(async (p) => ((await hasStoredAudio(p.id)) ? p.id : null))
+    ).then((ids) => {
+      if (!cancelled) setStoredAudio(new Set(ids.filter((id): id is string => id !== null)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projects]);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -112,7 +131,7 @@ export default function ProjectList({
                 <a className="project-nav-link" href={`/projects/${p.id}/export`}>
                   出力
                 </a>
-                {p.hasAudio ? <span className="badge">音声あり</span> : null}
+                {storedAudio.has(p.id) ? <span className="badge">音声あり</span> : null}
                 <div className="spacer" />
                 <span className="muted" style={{ fontSize: 12 }}>
                   更新 {formatDate(p.updatedAt)}

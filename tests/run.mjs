@@ -75,6 +75,7 @@ const suites = [
   ["編集", "./editor.test.mjs"],
   ["話者ピッカー", "./picker.test.mjs"],
   ["音声連動", "./audio.test.mjs"],
+  ["音声の保存", "./audiostore.test.mjs"],
   ["スクロール連動", "./scrollsync.test.mjs"],
   ["画面ナビゲーション", "./nav.test.mjs"],
   ["整文フィールドの保存・読み込み", "./refinements.test.mjs"],

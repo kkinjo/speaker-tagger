@@ -65,6 +65,19 @@ export default function EditorApp({
   /* ---- 音声 ---- */
   const audioRef = useRef<HTMLAudioElement>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  /**
+   * このページで選んだ音声ファイル。このページを開いている間は、ブラウザへの
+   * 保存の成否にかかわらずこれを再生する（保存に失敗しても聞けるように）。
+   */
+  const pickedAudioRef = useRef<File | null>(null);
+  /**
+   * サーバーには「音声あり」と記録されているが、このブラウザに本体が無い。
+   * ブラウザのデータを消した・別の端末やブラウザで開いた・保存に失敗した、など。
+   * このときは音の出ない再生バーではなく、選び直す画面を出す。
+   */
+  const [audioMissing, setAudioMissing] = useState(false);
+  const [audioSaving, setAudioSaving] = useState(false);
+  const [audioSaveError, setAudioSaveError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -155,6 +168,14 @@ export default function EditorApp({
     };
   }, [title, rawText, participants, mru, audioMeta, save]);
 
+  // 音声をブラウザへ保存している間に画面を移ると、保存が中断されて外れてしまう
+  useEffect(() => {
+    if (!audioSaving) return;
+    const beforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [audioSaving]);
+
   // 未保存のまま閉じようとしたら、送れるだけ送りつつ引き止める
   useEffect(() => {
     const beforeUnload = (e: BeforeUnloadEvent) => {
@@ -223,14 +244,24 @@ export default function EditorApp({
   useEffect(() => {
     let url: string | null = null;
     let cancelled = false;
-    if (audioMeta) {
+    setAudioMissing(false);
+    const picked = pickedAudioRef.current;
+    if (!audioMeta) {
+      setAudioUrl(null);
+    } else if (picked && picked.name === audioMeta.name && picked.size === audioMeta.size) {
+      url = URL.createObjectURL(picked);
+      setAudioUrl(url);
+    } else {
+      setAudioUrl(null);
       void getAudio(project.id).then((blob) => {
-        if (cancelled || !blob) return;
+        if (cancelled) return;
+        if (!blob) {
+          setAudioMissing(true);
+          return;
+        }
         url = URL.createObjectURL(blob);
         setAudioUrl(url);
       });
-    } else {
-      setAudioUrl(null);
     }
     return () => {
       cancelled = true;
@@ -623,12 +654,28 @@ export default function EditorApp({
   }
 
   async function pickAudio(file: File) {
-    await putAudio(project.id, file);
+    // 保存の完了を待たずに再生できるようにする（大きなファイルは保存に時間がかかる）
+    pickedAudioRef.current = file;
+    setAudioSaveError(null);
     setAudioMeta({ name: file.name, size: file.size, type: file.type });
+    setAudioSaving(true);
+    try {
+      await putAudio(project.id, file);
+    } catch (e) {
+      const reason =
+        e instanceof DOMException
+          ? `${e.name}${e.message ? `：${e.message}` : ""}`
+          : String(e);
+      setAudioSaveError(reason);
+    } finally {
+      setAudioSaving(false);
+    }
   }
 
   async function removeAudio() {
     await deleteAudio(project.id);
+    pickedAudioRef.current = null;
+    setAudioSaveError(null);
     setAudioMeta(null);
     setPlaying(false);
     setCurrentTime(0);
@@ -783,11 +830,13 @@ export default function EditorApp({
                   参加者を登録する（<kbd>@</kbd> の候補になります）
                 </span>
               </li>
-              <li className={audioMeta ? "done" : ""}>
-                <span className="num">{audioMeta ? "✓" : "3"}</span>
+              <li className={audioMeta && audioUrl ? "done" : ""}>
+                <span className="num">{audioMeta && audioUrl ? "✓" : "3"}</span>
                 <span>
                   音声ファイルを取り込む（任意。聞きながら編集できます）
-                  {audioMeta ? `　${audioMeta.name}（${formatBytes(audioMeta.size)}）` : ""}
+                  {audioMeta && audioUrl
+                    ? `　${audioMeta.name}（${formatBytes(audioMeta.size)}）`
+                    : ""}
                 </span>
               </li>
               <li>
@@ -862,7 +911,11 @@ export default function EditorApp({
       </div>
 
       <AudioBar
-        hasAudio={Boolean(audioMeta)}
+        hasAudio={Boolean(audioMeta && audioUrl)}
+        loading={Boolean(audioMeta && !audioUrl && !audioMissing)}
+        missingName={audioMeta && audioMissing ? audioMeta.name : null}
+        saving={audioSaving}
+        saveError={audioSaveError}
         fileName={audioMeta?.name ?? null}
         playing={playing}
         currentTime={currentTime}
