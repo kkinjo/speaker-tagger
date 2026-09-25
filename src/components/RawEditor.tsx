@@ -66,6 +66,11 @@ export default function RawEditor({
    * カーソルがその `@` から離れたら（改行・空白をまたぐ、`@` を消すなど）解除する。
    */
   const dismissedStartRef = useRef<number | null>(null);
+  /**
+   * ピッカーを開いた（または絞り込んだ）ときのカーソル位置。
+   * これと違う位置へカーソルが動いたら、入力以外の操作で動かしたとみなして閉じる。
+   */
+  const typedCaretRef = useRef<number | null>(null);
 
   // テキストエリアは非制御。React に value を渡すと、更新のたびに
   // textarea の defaultValue が入れ直され、長い議事録では本文全体の
@@ -137,11 +142,12 @@ export default function RawEditor({
         return;
       }
       if (!typed) {
-        // 開いている `@` の中でカーソルが動いただけなら開いたまま、
-        // 別の `@` に移ったなら閉じる
-        setSuggest((s) =>
-          !s.open ? s : s.start === found.start ? { ...s, query: found.query } : CLOSED
-        );
+        // 入力以外でカーソルが動いたら（矢印キー・Home/End・クリック）閉じる。
+        // 同じ `@…` の中での移動でも閉じる。開いたままだと、移動先で Enter を
+        // 押したときにそこで候補が確定してしまう。日本語は語の間に空白が無く、
+        // `@山` の後ろに本文が続いていると → で本文側へ動かしても同じ `@…` の
+        // 続きに見えるため、位置が変わったかどうかで判断する
+        if (caret !== typedCaretRef.current) setSuggest((s) => (s.open ? CLOSED : s));
         return;
       }
       // Escape で閉じた書きかけの `@` は、未登録の @ と同じく本文として残す
@@ -150,6 +156,7 @@ export default function RawEditor({
         return;
       }
       dismissedStartRef.current = null;
+      typedCaretRef.current = caret;
       const mirror = mirrorRef.current;
       const pos = mirror
         ? caretPosition(mirror, ta.value, found.start)
@@ -189,6 +196,23 @@ export default function RawEditor({
     const delta = Math.min(overflow, Math.max(0, room));
     if (delta > 0) scroller.scrollTop += delta;
   }, [suggest.open, suggest.start, scrollRef]);
+
+  /**
+   * ↑↓ で選んだ候補が、候補の枠（最大 260px）の外に出たら枠の中をスクロールする。
+   * 左ペイン自体は動かさない（開いた瞬間の1回だけ、という上の決めごとを崩さない）。
+   */
+  useLayoutEffect(() => {
+    if (!suggest.open) return;
+    const box = suggestRef.current;
+    const item = box?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!box || !item) return;
+    const PAD = 4; // .suggest の padding
+    if (item.offsetTop < box.scrollTop + PAD) {
+      box.scrollTop = item.offsetTop - PAD;
+    } else if (item.offsetTop + item.offsetHeight > box.scrollTop + box.clientHeight - PAD) {
+      box.scrollTop = item.offsetTop + item.offsetHeight - box.clientHeight + PAD;
+    }
+  }, [suggest.open, suggest.index, candidates]);
 
   const commit = useCallback(
     (participant: Participant) => {

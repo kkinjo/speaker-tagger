@@ -65,7 +65,22 @@ export default async function run() {
     await importJson(page, files.medium, 500);
 
     const partsTa = page.locator("textarea.participant-text");
-    await partsTa.fill("●●小/太田\n県教委/山田\n●●小/田中");
+    await partsTa.fill(
+      [
+        "●●小/太田",
+        "県教委/山田",
+        "●●小/田中",
+        "●●小/佐藤",
+        "●●小/鈴木",
+        "県教委/高橋",
+        "県教委/伊藤",
+        "県教委/渡辺",
+        "●●小/中村",
+        "●●小/小林",
+        "県教委/加藤",
+        "県教委/吉川",
+      ].join("\n")
+    );
     await partsTa.blur();
     await page.waitForTimeout(200);
     await page.getByRole("button", { name: "設定を閉じる" }).click();
@@ -245,6 +260,90 @@ export default async function run() {
     await page.waitForTimeout(200);
     r.check(
       "そこからの ↓ も本文のカーソル移動になる",
+      (await page.locator(".suggest").count()) === 0
+    );
+
+    /* ---- ↑↓ で選んだ候補が、候補の枠の中でスクロールして見える ---- */
+    await page.evaluate(() => {
+      const ta = document.querySelector("textarea.editor-input");
+      ta.focus();
+      ta.setSelectionRange(0, 0);
+    });
+    await page.keyboard.type("@");
+    await page.waitForSelector(".suggest", { timeout: 3000 });
+    const total = await page.locator(".suggest-item").count();
+    for (let i = 0; i < total - 1; i++) await page.keyboard.press("ArrowDown");
+    await page.waitForTimeout(200);
+    const lastVisible = await page.evaluate(() => {
+      const box = document.querySelector(".suggest").getBoundingClientRect();
+      const item = document
+        .querySelector('.suggest-item[aria-selected="true"]')
+        .getBoundingClientRect();
+      return item.top >= box.top && item.bottom <= box.bottom;
+    });
+    r.check(
+      "↓ で一番下の候補まで進むと、候補の枠がスクロールして見える",
+      total === 12 && lastVisible,
+      `total=${total}`
+    );
+    await page.keyboard.press("ArrowDown"); // 先頭へ戻る
+    await page.waitForTimeout(200);
+    const firstVisible = await page.evaluate(() => {
+      const box = document.querySelector(".suggest").getBoundingClientRect();
+      const item = document
+        .querySelector('.suggest-item[aria-selected="true"]')
+        .getBoundingClientRect();
+      return item.top >= box.top && item.bottom <= box.bottom;
+    });
+    r.check("末尾から先頭へ戻ったときも見える", firstVisible);
+
+    /* ---- ピッカー表示中にカーソルを動かしたら閉じる（移動先で確定しない） ---- */
+    // ← → で動かしても同じ `@…` の中にいる限り開いたままだったため、
+    // 移動先で Enter を押すと、そこで選択中の候補が確定していた
+    await page.keyboard.type("山");
+    await page.waitForTimeout(150);
+    await page.keyboard.press("ArrowLeft"); // `@` と `山` の間へ
+    await page.waitForTimeout(200);
+    r.check(
+      "ピッカー表示中に ← でカーソルを動かすと閉じる",
+      (await page.locator(".suggest").count()) === 0
+    );
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(200);
+    const head = await page.locator("textarea.editor-input").inputValue();
+    r.check(
+      "移動先の Enter は普通の改行になり、選択中の候補は確定しない",
+      head.startsWith("@\n山"),
+      JSON.stringify(head.slice(0, 12))
+    );
+
+    // 日本語は語の間に空白が無いので、→ で本文側へ動かしても
+    // 同じ `@…` の続きとみなされていた
+    await page.evaluate(() => {
+      const ta = document.querySelector("textarea.editor-input");
+      ta.focus();
+      ta.setSelectionRange(2, 2); // 「山本日は…」の行頭（直前の確認で作った行）
+    });
+    await page.keyboard.type("@佐");
+    await page.waitForSelector(".suggest", { timeout: 3000 });
+    await page.keyboard.press("ArrowRight");
+    await page.waitForTimeout(200);
+    r.check(
+      "ピッカー表示中に → で本文側へ動かすと閉じる",
+      (await page.locator(".suggest").count()) === 0
+    );
+
+    await page.evaluate(() => {
+      const ta = document.querySelector("textarea.editor-input");
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    });
+    await page.keyboard.type("\n@");
+    await page.waitForSelector(".suggest", { timeout: 3000 });
+    await page.locator("textarea.editor-input").click({ position: { x: 40, y: 20 } });
+    await page.waitForTimeout(200);
+    r.check(
+      "ピッカー表示中にクリックでカーソルを動かすと閉じる",
       (await page.locator(".suggest").count()) === 0
     );
   } finally {
