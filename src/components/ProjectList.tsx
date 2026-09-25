@@ -125,9 +125,9 @@ export default function ProjectList({
               <div className="project-row" key={p.id}>
                 {/* 会議名はリンクにしない。どの画面を開くかは番号付きのボタンで選ぶ */}
                 <span className="title">{p.title}</span>
+                <div className="spacer" />
                 <ScreenLinks projectId={p.id} />
                 {storedAudio.has(p.id) ? <span className="badge">音声あり</span> : null}
-                <div className="spacer" />
                 <span className="muted" style={{ fontSize: 12 }}>
                   更新 {formatDate(p.updatedAt)}
                 </span>
