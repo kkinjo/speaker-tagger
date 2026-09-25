@@ -141,11 +141,12 @@ export default function RawEditor({
       if (!ta) return;
       const label = participantLabel(participant);
       const caret = ta.selectionStart;
-      // 行末なら改行を足してそのまま本文を打ち始められるようにし、
-      // 既存の発言の頭に差し込んだ場合は空白で区切る
-      const lineEnd = ta.value.indexOf("\n", caret);
-      const rest = ta.value.slice(caret, lineEnd < 0 ? undefined : lineEnd);
-      const suffix = rest.trim() === "" ? "\n" : " ";
+      // 1ブロック = 話者1人を徹底するため、メンション確定時は無条件で
+      // 改行を入れる（1ブロックに @ を2つ書いて重ねて表示する運用は廃止）。
+      // カーソル直後にすでに改行があるならそれ以上は足さない。常に足すと、
+      // 話者を付け替える場面（既存の @ を消して打ち直すなど）で元々あった
+      // 改行がそのまま残り、空行が増えてしまうため
+      const suffix = ta.value[caret] === "\n" ? "" : "\n";
       replaceRange(ta, suggest.start, caret, `@${label}${suffix}`);
       onUseSpeaker(participant.id);
       setSuggest(CLOSED);
