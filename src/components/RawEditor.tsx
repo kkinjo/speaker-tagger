@@ -61,11 +61,8 @@ export default function RawEditor({
   const composingRef = useRef(false);
   const [suggest, setSuggest] = useState<SuggestState>(CLOSED);
   /**
-   * Escape で閉じた `@` の位置。同じ `@` の入力が続いている間は開き直さない。
-   *
-   * Escape は keydown で閉じるが、そのあとの keyup で refreshSuggest が走り、
-   * カーソルがまだ `@…` の直後にあるため即座に開き直してしまっていた。
-   * 結果として Escape が効かず、上下キーも候補選択に取られたままになる。
+   * Escape で閉じた `@` の位置。同じ `@` に続けて文字を打っても開き直さない
+   * （書きかけの `@…` は未登録の @ と同じく本文として残す）。
    * カーソルがその `@` から離れたら（改行・空白をまたぐ、`@` を消すなど）解除する。
    */
   const dismissedStartRef = useRef<number | null>(null);
@@ -117,8 +114,17 @@ export default function RawEditor({
     });
   }, [participants, mru, suggest.query]);
 
+  /**
+   * ピッカーの開閉を判定する。
+   *
+   * 開くのは文字を入力したとき（`typed`）だけ。カーソル移動（矢印キー・
+   * クリック・確定や Escape の keyup）では閉じることはあっても開かない。
+   * 以前はカーソル移動でも開いていたため、カーソルが `@所属/氏名` の直後や
+   * 途中に来るたびに開き、上下キーを候補選択に取られて本文へ戻れなかった
+   * （Escape や Enter で閉じても、その keyup で即座に開き直していた）。
+   */
   const refreshSuggest = useCallback(
-    (ta: HTMLTextAreaElement) => {
+    (ta: HTMLTextAreaElement, typed: boolean) => {
       if (composingRef.current) return;
       const caret = ta.selectionStart;
       const found =
@@ -128,6 +134,14 @@ export default function RawEditor({
       if (!found || participants.length === 0) {
         dismissedStartRef.current = null;
         setSuggest((s) => (s.open ? CLOSED : s));
+        return;
+      }
+      if (!typed) {
+        // 開いている `@` の中でカーソルが動いただけなら開いたまま、
+        // 別の `@` に移ったなら閉じる
+        setSuggest((s) =>
+          !s.open ? s : s.start === found.start ? { ...s, query: found.query } : CLOSED
+        );
         return;
       }
       // Escape で閉じた書きかけの `@` は、未登録の @ と同じく本文として残す
@@ -247,16 +261,16 @@ export default function RawEditor({
           onChange={(e) => {
             onChange(e.target.value);
             onCaretChange(e.target.selectionStart);
-            refreshSuggest(e.target);
+            refreshSuggest(e.target, true);
           }}
           onKeyDown={handleKeyDown}
           onKeyUp={(e) => {
             syncCaret();
-            refreshSuggest(e.currentTarget);
+            refreshSuggest(e.currentTarget, false);
           }}
           onClick={(e) => {
             syncCaret();
-            refreshSuggest(e.currentTarget);
+            refreshSuggest(e.currentTarget, false);
           }}
           onSelect={syncCaret}
           onBlur={() => setSuggest(CLOSED)}
@@ -265,7 +279,7 @@ export default function RawEditor({
           }}
           onCompositionEnd={(e) => {
             composingRef.current = false;
-            refreshSuggest(e.currentTarget);
+            refreshSuggest(e.currentTarget, true);
           }}
         />
 

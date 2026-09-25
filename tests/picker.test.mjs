@@ -177,6 +177,76 @@ export default async function run() {
       "2回目も Escape で閉じられる",
       (await page.locator(".suggest").count()) === 0
     );
+
+    /* ---- Enter で確定したあと、ピッカーが開き直さない ---- */
+    // 下に既存の行がある空行で確定すると改行を足さないため、カーソルは
+    // `@所属/氏名` の直後に残る。そこで Enter の keyup が開き直していた
+    await page.evaluate(() => {
+      const ta = document.querySelector("textarea.editor-input");
+      const at = ta.value.indexOf("\n", Math.floor(ta.value.length * 0.6)) + 1;
+      ta.focus();
+      ta.setSelectionRange(at, at);
+      document.execCommand("insertText", false, "\n");
+      ta.setSelectionRange(at, at);
+    });
+    await page.keyboard.type("@");
+    await page.waitForSelector(".suggest", { timeout: 3000 });
+    await page.keyboard.type("山田");
+    await page.waitForTimeout(150);
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(300);
+    const committed = await page.evaluate(() => {
+      const ta = document.querySelector("textarea.editor-input");
+      return ta.value.slice(ta.selectionStart - "@県教委/山田".length, ta.selectionStart + 1);
+    });
+    r.check(
+      "確定した @ は既存の改行の手前で終わる（空行は増えない）",
+      committed === "@県教委/山田\n",
+      JSON.stringify(committed)
+    );
+    r.check(
+      "Enter で確定したあと、ピッカーが開き直さない",
+      (await page.locator(".suggest").count()) === 0
+    );
+    const caretBeforeDown = await page.evaluate(
+      () => document.querySelector("textarea.editor-input").selectionStart
+    );
+    await page.keyboard.press("ArrowDown");
+    await page.waitForTimeout(200);
+    r.check(
+      "確定直後の ↓ は本文のカーソル移動になる",
+      (await page.evaluate(
+        () => document.querySelector("textarea.editor-input").selectionStart
+      )) > caretBeforeDown && (await page.locator(".suggest").count()) === 0
+    );
+
+    /* ---- 矢印キーやクリックで既存の @ の上を通っても開かない ---- */
+    // メンションは必ず1行に1つになったので、上下移動でカーソルが
+    // `@所属/氏名` の途中や直後に止まることが多い
+    await page.keyboard.press("ArrowUp");
+    await page.waitForTimeout(200);
+    r.check(
+      "↑ で確定済みの @ の行に戻ってもピッカーは開かない",
+      (await page.locator(".suggest").count()) === 0
+    );
+    await page.evaluate(() => {
+      const ta = document.querySelector("textarea.editor-input");
+      const at = ta.value.indexOf("@県教委/山田") + 3; // `@県教` の直後
+      ta.focus();
+      ta.setSelectionRange(at, at);
+    });
+    await page.locator("textarea.editor-input").dispatchEvent("click");
+    await page.waitForTimeout(200);
+    r.check(
+      "クリックで @ の途中にカーソルを置いてもピッカーは開かない",
+      (await page.locator(".suggest").count()) === 0
+    );
+    await page.keyboard.press("ArrowDown");
+    await page.waitForTimeout(200);
+    r.check(
+      "そこからの ↓ も本文のカーソル移動になる",
+      (await page.locator(".suggest").count()) === 0
+    );
   } finally {
     await browser.close();
   }
