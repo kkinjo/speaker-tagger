@@ -26,6 +26,8 @@ async function reachable() {
 
 async function startServer() {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "speaker-tagger-test-"));
+  // 新規登録の停止のテスト（tests/signup.test.mjs）が、同じ保存先で別のサーバーを起動する
+  process.env.TEST_DATA_DIR = dataDir;
   // `npx next start` は子プロセス（next-server）を生むので、プロセスグループごと
   // 起動しておく。親だけを kill すると next-server がポートを掴んだまま残り、
   // 次回の実行が「既に動いているサーバー」としてそれを使い回してしまう
@@ -36,6 +38,8 @@ async function startServer() {
       ...process.env,
       APP_SECRET: "test-secret",
       DATA_DIR: dataDir,
+      // テストは利用者を都度作るので、新規登録を受け付ける（既定では受け付けない）
+      ALLOW_SIGNUP: "1",
       // 整文は本物の Anthropic API ではなくスタブへ向ける（tests/anthropicStub.mjs）
       ANTHROPIC_API_KEY: "test-key",
       REFINE_API_URL: STUB_API_URL,
@@ -83,6 +87,7 @@ const suites = [
   ["整文画面", "./refine.test.mjs"],
   ["出力画面", "./export.test.mjs"],
   ["データ分離", "./isolation.test.mjs"],
+  ["新規登録の停止", "./signup.test.mjs"],
   ["大きな議事録", "./performance.test.mjs"],
 ];
 

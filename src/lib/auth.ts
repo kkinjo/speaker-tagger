@@ -27,6 +27,15 @@ async function secret(): Promise<string> {
   return generated;
 }
 
+/**
+ * 新規登録を受け付けるか。既定は受け付けない。
+ * 環境変数 `ALLOW_SIGNUP=1` のときだけ受け付ける（最初の利用者を作るとき・
+ * 利用者を増やすときに一時的に設定する）。ログインは常にできる。
+ */
+export function signupEnabled(): boolean {
+  return process.env.ALLOW_SIGNUP === "1";
+}
+
 export function hashPassword(password: string, salt: string): string {
   return crypto.scryptSync(password, salt, 64).toString("hex");
 }

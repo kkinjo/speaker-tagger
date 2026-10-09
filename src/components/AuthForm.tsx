@@ -5,7 +5,12 @@ import { useRouter } from "next/navigation";
 
 type Mode = "login" | "signup";
 
-export default function AuthForm() {
+/**
+ * ログイン・新規登録のフォーム。
+ * 新規登録を受け付けていないとき（`allowSignup` が false）は、タブを出さず
+ * ログインだけを表示する。登録の可否はサーバー側（/api/auth/signup）でも判定する。
+ */
+export default function AuthForm({ allowSignup }: { allowSignup: boolean }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
   const [username, setUsername] = useState("");
@@ -46,30 +51,32 @@ export default function AuthForm() {
           データはログインしたユーザーごとに分かれて保存されます。
         </p>
 
-        <div className="auth-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "login"}
-            onClick={() => {
-              setMode("login");
-              setError("");
-            }}
-          >
-            ログイン
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "signup"}
-            onClick={() => {
-              setMode("signup");
-              setError("");
-            }}
-          >
-            新規登録
-          </button>
-        </div>
+        {allowSignup ? (
+          <div className="auth-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "login"}
+              onClick={() => {
+                setMode("login");
+                setError("");
+              }}
+            >
+              ログイン
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "signup"}
+              onClick={() => {
+                setMode("signup");
+                setError("");
+              }}
+            >
+              新規登録
+            </button>
+          </div>
+        ) : null}
 
         <form onSubmit={submit}>
           <label>

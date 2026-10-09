@@ -59,7 +59,10 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
-初回は画面右上の「新規登録」からユーザーを作ります。
+新規登録は既定で受け付けません（他の人に勝手に登録されないように）。
+最初のユーザーを作るときだけ `ALLOW_SIGNUP=1` を付けて起動し、ログイン画面の
+「新規登録」から作ってください（`ALLOW_SIGNUP=1 npm run dev`）。作り終えたら外して
+起動し直せば、ログインだけの画面に戻ります。
 保存先は既定でプロジェクト直下の `.data/`（JSON ファイル）です。
 
 本番相当で動かす場合:
@@ -79,6 +82,7 @@ npm start
 | `DATA_DIR` | ファイル保存先を変えたいとき（既定 `.data`） |
 | `ANTHROPIC_API_KEY` | 整文画面（②）で Anthropic API を使うための鍵。**サーバー側のみ。**未設定だと整文が全行失敗します |
 | `REFINE_MODEL` | 整文に使うモデル（既定 `claude-sonnet-5`）。コスト優先なら `claude-haiku-4-5` |
+| `ALLOW_SIGNUP` | `1` のときだけ新規登録を受け付ける（既定は受け付けない）。ログイン画面の「新規登録」タブも、このときだけ出ます。登録の可否はサーバー側（`/api/auth/signup`）でも判定するので、画面を経由せず API を直接呼んでも登録できません |
 
 KV 系の変数が設定されていればそちらを、なければファイル保存を使います。
 
@@ -98,6 +102,9 @@ Vercel などのサーバーレス環境はファイルシステムに書き込�
    → `KV_REST_API_URL` / `KV_REST_API_TOKEN` が自動で入ります
 3. 環境変数に `APP_SECRET` を追加（`openssl rand -hex 32` などで生成）
 4. デプロイ
+
+利用者を増やすときは、Vercel の環境変数に `ALLOW_SIGNUP` = `1` を追加して
+再デプロイし、登録が済んだら削除して再デプロイします（新規登録は既定で止まっています）。
 
 Netlify / Cloudflare Pages / 自前サーバーでも、上記の環境変数を渡せば同じように動きます。
 
@@ -349,6 +356,7 @@ npm run test:e2e
 - `tests/refine.test.mjs` … 整文画面のステータス遷移・一括変換・中断・再開・保存、確認ダイアログ、絞り込み、原文のまま確定、429/5xx のエラー処理、プリセットの保存
 - `tests/anthropicStub.mjs` … 上記が使う Anthropic API のスタブ（本物の API は叩きません）
 - `tests/export.test.mjs` … 出力画面の列の出し分け・整文後/原文の切替・コピー・設定の保存
+- `tests/signup.test.mjs` … 新規登録の停止（API で止まる・タブが出ない・既存の利用者はログインできる）
 - `tests/isolation.test.mjs` … 他ユーザーのデータに触れないこと（新設の②③も含む）
 - `tests/performance.test.mjs` … 1 時間規模（約 2,500 発言・2 万語）での入力の重さと時刻の正しさ
 
