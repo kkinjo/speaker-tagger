@@ -76,6 +76,7 @@ if (await reachable()) {
 const suites = [
   ["sourceKey", "./sourceKey.test.mjs"],
   ["normalizeProject", "./normalizeProject.test.mjs"],
+  ["区切りの時刻表記", "./separator.test.mjs"],
   ["編集", "./editor.test.mjs"],
   ["話者ピッカー", "./picker.test.mjs"],
   ["音声連動", "./audio.test.mjs"],

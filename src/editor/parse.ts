@@ -49,20 +49,37 @@ export type ParsedDoc = {
 };
 
 export const SEPARATOR = "--";
-/** `--` / `----` / `--@12.3` のいずれも区切りとして扱う */
-const SEP_RE = /^[ \t　]*-{2,}[ \t　]*(?:@[ \t　]*(\d+(?:\.\d+)?))?[ \t　]*$/;
+/**
+ * 区切り行に書ける時刻の表記。次のいずれも受け付ける。
+ * - 秒：`12.3`（取り込み・Alt+D で自動的に付くのはこの形）
+ * - 分:秒：`1:23` / `1:23.5`（再生バーの表示と同じ形。手で書き足すとき用）
+ * - 時:分:秒：`1:02:03`（1時間を超える会議で、表の「時刻」列と同じ形）
+ * 分・秒の桁は 0〜59。`1:75` のような値は時刻として読まない。
+ */
+const TIME_PART = "\\d+(?:\\.\\d+)?|\\d+:[0-5]?\\d(?:\\.\\d+)?|\\d+:[0-5]?\\d:[0-5]?\\d(?:\\.\\d+)?";
+/** `--` / `----` / `--@12.3` / `--@1:23` / `--@1:02:03` のいずれも区切りとして扱う */
+const SEP_RE = new RegExp(
+  `^[ \\t　]*-{2,}[ \\t　]*(?:@[ \\t　]*(${TIME_PART}))?[ \\t　]*$`
+);
 const HEADING_RE = /^[ \t　]*#+[ \t　]*/;
 
 export function isSeparatorLine(line: string): boolean {
   return SEP_RE.test(line);
 }
 
+/** `12.3` / `1:23.5` / `1:02:03` を秒に直す */
+function parseTimeLabel(label: string): number | null {
+  const v = label
+    .split(":")
+    .reduce((total, part) => total * 60 + Number(part), 0);
+  return Number.isFinite(v) ? v : null;
+}
+
 /** 区切り行に書かれた時刻 (秒)。`--` だけなら null */
 export function separatorTime(line: string): number | null {
   const m = SEP_RE.exec(line);
   if (!m || m[1] === undefined) return null;
-  const v = Number(m[1]);
-  return Number.isFinite(v) ? v : null;
+  return parseTimeLabel(m[1]);
 }
 
 /** 時刻付きの区切り行を作る。時刻が分からないときは `--` のまま */
