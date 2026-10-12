@@ -87,6 +87,7 @@ const suites = [
   ["整文フィールドの保存・読み込み", "./refinements.test.mjs"],
   ["固有名詞の登録", "./glossary.test.mjs"],
   ["整文画面", "./refine.test.mjs"],
+  ["メモ", "./memo.test.mjs"],
   ["出力画面", "./export.test.mjs"],
   ["データ分離", "./isolation.test.mjs"],
   ["新規登録の停止", "./signup.test.mjs"],

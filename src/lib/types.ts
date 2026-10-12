@@ -35,6 +35,8 @@ export type UserSettings = {
   exportIncludeSpeaker: boolean;
   /** true: 整文後のテキストを使う（無ければ原文で補う） / false: 原文 */
   exportUseRefined: boolean;
+  /** メモ（Project.memo）を開いているか。①②で共通 */
+  memoOpen: boolean;
 };
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -46,6 +48,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   exportIncludeTime: false,
   exportIncludeSpeaker: true,
   exportUseRefined: true,
+  memoOpen: false,
 };
 
 export type User = {
@@ -108,11 +111,17 @@ export type Project = {
    * プリセット（formal）として扱う。
    */
   promptPresetId?: string;
+  /**
+   * 担当者用の自由記述メモ（参加者の正式名称、誤変換されやすい語など）。
+   * 人が読むためのもので、整文の AI には渡さない。固有名詞リスト（glossary）とは別物。
+   * 打った内容をそのまま保存する（解析・整形しない）
+   */
+  memo: string;
 };
 
 /**
  * KV から読み出した Project を正規化する。
- * refinements / glossary は後から追加したフィールドなので、
+ * refinements / glossary / memo は後から追加したフィールドなので、
  * それ以前に保存された既存プロジェクトには存在しない。
  */
 export function normalizeProject(project: Project): Project {
@@ -120,6 +129,7 @@ export function normalizeProject(project: Project): Project {
     ...project,
     refinements: project.refinements ?? {},
     glossary: project.glossary ?? [],
+    memo: project.memo ?? "",
   };
 }
 

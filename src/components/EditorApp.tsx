@@ -27,6 +27,7 @@ import ParticipantsPanel from "./ParticipantsPanel";
 import ImportPanel from "./ImportPanel";
 import HelpModal from "./HelpModal";
 import ProjectNav from "./ProjectNav";
+import MemoPanel from "./MemoPanel";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 
@@ -56,6 +57,8 @@ export default function EditorApp({
   const [audioMeta, setAudioMeta] = useState(project.audio);
   const [imported, setImported] = useState(project.imported);
   const [wordData, setWordData] = useState<ProjectWords | null>(words);
+  /** 担当者用のメモ（MemoPanel）。整文には渡さない */
+  const [memo, setMemo] = useState(project.memo);
 
   /* ---- 画面の状態 ---- */
   const [fontSize, setFontSize] = useState(settings.fontSize);
@@ -134,25 +137,41 @@ export default function EditorApp({
   /* ---- 保存 ---- */
   const dirtyRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const payloadRef = useRef({ title, rawText, participants, mru, audioMeta });
-  payloadRef.current = { title, rawText, participants, mru, audioMeta };
+  const payloadRef = useRef({ title, rawText, participants, mru, audioMeta, memo });
+  payloadRef.current = { title, rawText, participants, mru, audioMeta, memo };
   const firstRender = useRef(true);
+  /**
+   * サーバーにあると分かっているメモ。これと違うときだけ PATCH に memo を含める。
+   * ①と②を別タブで開いていても、メモを触っていない側が古い内容で上書きしないようにする
+   */
+  const savedMemoRef = useRef(project.memo);
+
+  const savePayload = () => {
+    const p = payloadRef.current;
+    const body: Record<string, unknown> = {
+      title: p.title,
+      rawText: p.rawText,
+      participants: p.participants,
+      mru: p.mru,
+      audio: p.audioMeta,
+    };
+    if (p.memo !== savedMemoRef.current) body.memo = p.memo;
+    return body;
+  };
+  const savePayloadRef = useRef(savePayload);
+  savePayloadRef.current = savePayload;
 
   const save = useCallback(async () => {
     setSaveState("saving");
+    const body = savePayloadRef.current();
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: payloadRef.current.title,
-          rawText: payloadRef.current.rawText,
-          participants: payloadRef.current.participants,
-          mru: payloadRef.current.mru,
-          audio: payloadRef.current.audioMeta,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("save failed");
+      if (typeof body.memo === "string") savedMemoRef.current = body.memo;
       dirtyRef.current = false;
       setSaveState("saved");
     } catch {
@@ -172,7 +191,7 @@ export default function EditorApp({
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [title, rawText, participants, mru, audioMeta, save]);
+  }, [title, rawText, participants, mru, audioMeta, memo, save]);
 
   // 音声をブラウザへ保存している間に画面を移ると、保存が中断されて外れてしまう
   useEffect(() => {
@@ -192,13 +211,7 @@ export default function EditorApp({
       void fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: payloadRef.current.title,
-          rawText: payloadRef.current.rawText,
-          participants: payloadRef.current.participants,
-          mru: payloadRef.current.mru,
-          audio: payloadRef.current.audioMeta,
-        }),
+        body: JSON.stringify(savePayloadRef.current()),
         keepalive: true,
       });
     };
@@ -211,18 +224,16 @@ export default function EditorApp({
   }, [project.id]);
 
   /* ---- 表示設定の保存 ---- */
-  const settingsRef = useRef<UserSettings>(settings);
+  // この画面で変える設定だけを送る。サーバー側で既存の設定に重ねるので、
+  // ③専用の設定（exportIncludeTime など）やメモの開閉（MemoPanel が自分で送る）を
+  // 別タブで変えていても、ここから古い値で上書きしない
+  const settingsRef = useRef<Partial<UserSettings>>({});
   settingsRef.current = {
     fontSize,
     paneMode,
     playbackRate: rate,
     followPlayback: follow,
     syncScroll,
-    // 出力画面（③）専用の設定。①では変更しないので、初期値をそのまま送り返す
-    // （settings は prop なのでマウント中は不変）
-    exportIncludeTime: settings.exportIncludeTime,
-    exportIncludeSpeaker: settings.exportIncludeSpeaker,
-    exportUseRefined: settings.exportUseRefined,
   };
 
   const saveSettings = useCallback((keepalive: boolean) => {
@@ -576,7 +587,12 @@ export default function EditorApp({
       );
     };
 
+    /** メモ（MemoPanel）の中か。生テキストを書き換えるショートカットを効かせない */
+    const inMemo = (el: EventTarget | null) =>
+      el instanceof Element && el.closest(".memo-panel") !== null;
+
     const onKey = (e: KeyboardEvent) => {
+      // メモの textarea は入力欄なので、Space では再生しない（下の isTextField）。
       // 入力欄の外なら Space だけで再生/一時停止できる。
       // 入力欄の中では Shift+Space（Ctrl+Space は Windows/macOS で
       // 入力ソース切り替え等の OS 標準ショートカットに割り当てられて
@@ -589,6 +605,11 @@ export default function EditorApp({
         }
       }
       if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      // メモに書いている最中に、区切り・話者の挿入や未割り当てへの移動で
+      // 生テキスト側を書き換えたりフォーカスを奪ったりしない
+      if (inMemo(e.target) && (e.code === "KeyD" || e.code === "KeyA" || e.code === "KeyJ")) {
+        return;
+      }
 
       switch (e.code) {
         case "ArrowLeft":
@@ -943,6 +964,14 @@ export default function EditorApp({
         onFollowChange={setFollow}
         onPickFile={(file) => void pickAudio(file)}
         onRemoveAudio={() => void removeAudio()}
+      />
+
+      {/* 右下に浮かせる。開くと表（「左のみ」では編集欄）の上に重なる */}
+      <MemoPanel
+        value={memo}
+        onChange={setMemo}
+        initialOpen={settings.memoOpen}
+        position="bottom-right"
       />
 
       {audioUrl ? (

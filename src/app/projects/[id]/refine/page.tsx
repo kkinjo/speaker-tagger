@@ -31,7 +31,11 @@ export default async function RefinePage({
         <ProjectNav projectId={project.id} current="refine" />
         <span style={{ fontWeight: 600 }}>{project.title}</span>
       </header>
-      <RefineApp project={project} presets={PROMPT_PRESETS} />
+      <RefineApp
+        project={project}
+        presets={PROMPT_PRESETS}
+        memoOpen={user.settings.memoOpen}
+      />
     </div>
   );
 }

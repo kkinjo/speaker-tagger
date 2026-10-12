@@ -14,6 +14,8 @@ import http from "node:http";
  *   応答の種類を変え、回数を 0 に戻す。`max_tokens` は出力が途中で
  *   打ち切られた場合（本文が半分だけ返り、`stop_reason: "max_tokens"` が付く）を再現する
  * - `GET  /__stats` … `{ "calls": n }`。リトライ回数の確認に使う
+ * - `GET  /__requests` … 受け取ったリクエスト本文（文字列）の配列。
+ *   `/__mode` で空に戻る。整文に渡してはいけない情報（メモ）が含まれていないかの確認に使う
  */
 
 export const STUB_PORT = Number(process.env.REFINE_STUB_PORT ?? 3101);
@@ -53,6 +55,8 @@ function targetBody(payload) {
 export async function startStub() {
   let mode = "ok";
   let calls = 0;
+  /** 受け取ったリクエスト本文。直近 200 件だけ残す */
+  let bodies = [];
 
   const server = http.createServer(async (req, res) => {
     const json = (status, data) => {
@@ -64,16 +68,23 @@ export async function startStub() {
       const { mode: next } = JSON.parse((await readBody(req)) || "{}");
       mode = next ?? "ok";
       calls = 0;
+      bodies = [];
       return json(200, { mode });
     }
     if (req.method === "GET" && req.url === "/__stats") {
       return json(200, { calls, mode });
+    }
+    if (req.method === "GET" && req.url === "/__requests") {
+      return json(200, { bodies });
     }
     if (req.method !== "POST" || req.url !== "/v1/messages") {
       return json(404, { error: "not found" });
     }
 
     calls++;
+    const raw = await readBody(req);
+    bodies.push(raw);
+    if (bodies.length > 200) bodies.shift();
     if (mode === "429") {
       return json(429, { error: { type: "rate_limit_error", message: "stub 429" } });
     }
@@ -81,7 +92,7 @@ export async function startStub() {
       return json(500, { error: { type: "api_error", message: "stub 500" } });
     }
 
-    const payload = JSON.parse((await readBody(req)) || "{}");
+    const payload = JSON.parse(raw || "{}");
     await new Promise((resolve) => setTimeout(resolve, RESPONSE_DELAY_MS));
 
     if (mode === "max_tokens") {
@@ -125,4 +136,10 @@ export async function setStubMode(mode) {
 export async function stubCalls() {
   const res = await fetch(`${STUB_BASE}/__stats`);
   return (await res.json()).calls;
+}
+
+/** スタブが受けたリクエスト本文（文字列）の配列。`setStubMode()` で空に戻る */
+export async function stubRequests() {
+  const res = await fetch(`${STUB_BASE}/__requests`);
+  return (await res.json()).bodies;
 }

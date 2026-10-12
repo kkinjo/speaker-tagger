@@ -36,6 +36,9 @@ export async function PATCH(req: Request) {
   if (typeof patch.exportUseRefined === "boolean") {
     next.exportUseRefined = patch.exportUseRefined;
   }
+  if (typeof patch.memoOpen === "boolean") {
+    next.memoOpen = patch.memoOpen;
+  }
 
   await kv.set(keys.user(user.id), { ...user, settings: next });
   return NextResponse.json({ settings: next });

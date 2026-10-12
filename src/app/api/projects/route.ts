@@ -32,6 +32,7 @@ export async function POST(req: Request) {
     imported: false,
     refinements: {},
     glossary: [],
+    memo: "",
   };
 
   await kv.set(keys.project(project.id), project);

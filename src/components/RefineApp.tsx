@@ -8,6 +8,7 @@ import { blockSourceKey } from "@/editor/refine";
 import { requestRefine, RefineRequestError } from "@/editor/refineClient";
 import ConfirmModal from "./ConfirmModal";
 import GlossaryPanel from "./GlossaryPanel";
+import MemoPanel from "./MemoPanel";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 
@@ -183,9 +184,12 @@ type RefineOutcome = { ok: true } | { ok: false; error: RefineRequestError };
 export default function RefineApp({
   project,
   presets,
+  memoOpen,
 }: {
   project: Project;
   presets: PromptPreset[];
+  /** UserSettings.memoOpen。①と共通の値 */
+  memoOpen: boolean;
 }) {
   const [refinements, setRefinements] = useState<Refinements>(project.refinements);
   /**
@@ -194,6 +198,11 @@ export default function RefineApp({
    */
   const [glossary, setGlossary] = useState<string[]>(project.glossary);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
+  /**
+   * 担当者用のメモ（MemoPanel）。人が読むためのもので、整文には渡さない。
+   * `/api/refine` はプロジェクトを読み直してプロンプトを組むが、memo は使わない
+   */
+  const [memo, setMemo] = useState(project.memo);
   /**
    * 整文プロンプトのプリセット（第5.4章）。既存プロジェクトには
    * promptPresetId が無いので、その場合は既定（先頭 = formal）に倒す。
@@ -245,28 +254,39 @@ export default function RefineApp({
   /* ---- 保存（2秒デバウンス。第4章 4.4） ---- */
   const dirtyRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const payloadRef = useRef({ refinements, glossary, presetId });
-  payloadRef.current = { refinements, glossary, presetId };
+  const payloadRef = useRef({ refinements, glossary, presetId, memo });
+  payloadRef.current = { refinements, glossary, presetId, memo };
+  /**
+   * サーバーにあると分かっているメモ。これと違うときだけ PATCH に memo を含める。
+   * ①と②を別タブで開いていても、メモを触っていない側が古い内容で上書きしないようにする
+   */
+  const savedMemoRef = useRef(project.memo);
 
-  const savePayload = () =>
-    JSON.stringify({
-      refinements: payloadRef.current.refinements,
-      glossary: payloadRef.current.glossary,
-      promptPresetId: payloadRef.current.presetId,
-    });
+  const savePayload = () => {
+    const p = payloadRef.current;
+    const body: Record<string, unknown> = {
+      refinements: p.refinements,
+      glossary: p.glossary,
+      promptPresetId: p.presetId,
+    };
+    if (p.memo !== savedMemoRef.current) body.memo = p.memo;
+    return body;
+  };
   const savePayloadRef = useRef(savePayload);
   savePayloadRef.current = savePayload;
 
   const save = useCallback(async () => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaveState("saving");
+    const body = savePayloadRef.current();
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: savePayloadRef.current(),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("save failed");
+      if (typeof body.memo === "string") savedMemoRef.current = body.memo;
       dirtyRef.current = false;
       setSaveState("saved");
     } catch {
@@ -307,7 +327,7 @@ export default function RefineApp({
       void fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: savePayloadRef.current(),
+        body: JSON.stringify(savePayloadRef.current()),
         keepalive: true,
       });
     };
@@ -318,6 +338,14 @@ export default function RefineApp({
       window.removeEventListener("pagehide", pageHide);
     };
   }, [project.id]);
+
+  const handleMemoChange = useCallback(
+    (next: string) => {
+      setMemo(next);
+      scheduleSave();
+    },
+    [scheduleSave]
+  );
 
   const handleGlossaryChange = useCallback(
     (next: string[]) => {
@@ -748,6 +776,14 @@ export default function RefineApp({
           </tbody>
         </table>
       </div>
+
+      {/* 左下に浮かせる。開くと表の上に重なる。整文には渡さない */}
+      <MemoPanel
+        value={memo}
+        onChange={handleMemoChange}
+        initialOpen={memoOpen}
+        position="bottom-left"
+      />
 
       {/* 原文のまま確定した直後だけ出す取り消しの案内（第4章 4.6）。
           見るだけのつもりでクリックした誤操作を戻せるようにする。
