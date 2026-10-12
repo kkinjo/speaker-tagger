@@ -77,6 +77,12 @@ export default function HelpModal({ onClose }: Props) {
                 そのまま写して書けます。
               </li>
               <li>
+                <kbd>Alt+D</kbd> で区切りを入れると、時刻が時:分:秒（<kbd>--@0:01:23</kbd>）で
+                付きます。音声を再生・頭出ししているときは、再生位置の<strong>2秒前</strong>の
+                時刻です（話者が替わったのを聞いてから押すため。0秒より前にはなりません）。
+                再生していないときは、カーソル位置の単語の時刻がそのまま付きます。
+              </li>
+              <li>
                 <kbd>#</kbd>：議題の見出しです。話者を持たない、見出し専用の行になります。
               </li>
             </ul>
@@ -102,6 +108,9 @@ export default function HelpModal({ onClose }: Props) {
                 ))}
               </tbody>
             </table>
+            <p style={{ marginTop: 8 }}>
+              Mac では <kbd>Alt</kbd> の代わりに <kbd>Option（⌥）</kbd>キーを使います。
+            </p>
           </section>
         </div>
       </div>

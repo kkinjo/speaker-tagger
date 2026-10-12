@@ -1,5 +1,5 @@
 import { reporter } from "./helpers.mjs";
-import { isSeparatorLine, parseDoc, separatorTime } from "../src/editor/parse.ts";
+import { isSeparatorLine, parseDoc, separatorLine, separatorTime } from "../src/editor/parse.ts";
 
 /**
  * 区切り行（`--@時刻`）の時刻の読み取り（ブラウザ不要・純粋関数のテスト）。
@@ -54,6 +54,28 @@ export default async function run() {
     "各ブロックの時刻に、どの表記でも秒で入る",
     JSON.stringify(doc.blocks.map((b) => b.time)) === JSON.stringify([null, 83.5, 95, 3723]),
     JSON.stringify(doc.blocks.map((b) => b.time))
+  );
+
+  /* ---- 書き出し（Alt+D は 時:分:秒、取り込みは秒） ---- */
+  for (const [time, want, label] of [
+    [83.9, "--@0:01:23", "1時間未満でも時を省かない。秒は切り捨て"],
+    [3723.4, "--@1:02:03", "1時間を超える"],
+    [0, "--@0:00:00", "0秒"],
+    [null, "--", "時刻が分からないときは -- だけ"],
+  ]) {
+    r.check(
+      `時:分:秒で書き出す（${label}）：${time} → ${want}`,
+      separatorLine(time, "hms") === want,
+      separatorLine(time, "hms")
+    );
+  }
+  r.check(
+    "時:分:秒で書いた区切りは、そのまま読み戻せる",
+    separatorTime(separatorLine(3723.4, "hms")) === 3723
+  );
+  r.check(
+    "取り込みで使う秒の形は変わらない",
+    separatorLine(83.456) === "--@83.46" && separatorLine(83.456, "seconds") === "--@83.46"
   );
 
   return r.finish();

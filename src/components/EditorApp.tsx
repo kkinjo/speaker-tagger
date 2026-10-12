@@ -30,6 +30,12 @@ import ProjectNav from "./ProjectNav";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 
+/**
+ * Alt+D で再生位置から区切りの時刻を取るとき、何秒前にずらすか。
+ * 話者が替わったのを聞いてから押すので、再生位置は発言の頭より遅れている。
+ */
+const PLAYHEAD_LEAD = 2;
+
 export default function EditorApp({
   project,
   words,
@@ -451,11 +457,20 @@ export default function EditorApp({
     const before = ta.value.slice(0, at);
     const prefix = before.length === 0 || before.endsWith("\n") ? "" : "\n";
 
-    // ブロックを分割するこの瞬間にだけ単語データを引き、出てきた時刻を
-    // 区切り記号へ焼き付ける。以後この時刻は本文の編集では変わらない。
-    // 単語データで引けないときは、いま聞いている再生位置で代用する。
-    const fromWords =
-      timing.map && wordData
+    // 区切りに入れる時刻を、ブロックを分割するこの瞬間に決めて焼き付ける。
+    // 以後この時刻は本文の編集では変わらない。
+    // 音声を再生・頭出ししているなら、いま聞いている再生位置を使う
+    // （聞きながら話者の切り替わりで Alt+D を押す使い方のため）。
+    // 押すのは発言を聞いてからなので、再生位置は発言の頭より遅れている。
+    // PLAYHEAD_LEAD 秒だけ前にずらし、頭出しで発言の頭から聞けるようにする。
+    // 再生位置が無いときだけ、カーソル位置から単語データで引いた時刻を使う。
+    // 単語データの時刻は発言の頭そのものなので、ずらさない。
+    const playhead = audioRef.current?.currentTime ?? 0;
+    const fromPlayhead =
+      audioUrl && playhead > 0 ? Math.max(0, playhead - PLAYHEAD_LEAD) : null;
+    const time =
+      fromPlayhead ??
+      (timing.map && wordData
         ? timeAtOffset(
             at,
             doc.normOffsets,
@@ -463,11 +478,10 @@ export default function EditorApp({
             wordData.normWordIdx,
             wordData.words
           )
-        : null;
-    const playhead = audioRef.current?.currentTime ?? 0;
-    const time = fromWords ?? (audioUrl && playhead > 0 ? playhead : null);
+        : null);
 
-    replaceRange(ta, at, ta.selectionEnd, `${prefix}${separatorLine(time)}\n`);
+    // 手で読み書きしやすいよう、表の「時刻」列と同じ 時:分:秒 の形で入れる
+    replaceRange(ta, at, ta.selectionEnd, `${prefix}${separatorLine(time, "hms")}\n`);
   }, [timing.map, wordData, doc.normOffsets, audioUrl]);
 
   const openMention = useCallback(() => {

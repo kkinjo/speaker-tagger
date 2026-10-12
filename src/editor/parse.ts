@@ -82,9 +82,25 @@ export function separatorTime(line: string): number | null {
   return parseTimeLabel(m[1]);
 }
 
-/** 時刻付きの区切り行を作る。時刻が分からないときは `--` のまま */
-export function separatorLine(time: number | null): string {
+/**
+ * 時刻付きの区切り行を作る。時刻が分からないときは `--` のまま。
+ *
+ * - `"seconds"`（既定）：`--@83.5`。取り込み時に使う（10ms 単位まで残す）
+ * - `"hms"`：`--@0:01:23`。Alt+D で手元の再生位置から入れるときに使う。
+ *   時は 0 でも省かず、秒は切り捨てる（再生が発言の少し手前から始まるように）
+ */
+export function separatorLine(
+  time: number | null,
+  style: "seconds" | "hms" = "seconds"
+): string {
   if (time == null || !Number.isFinite(time) || time < 0) return SEPARATOR;
+  if (style === "hms") {
+    const total = Math.floor(time);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return `${SEPARATOR}@${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
   // 10ms より細かい桁は音声の頭出しに使わないので落とす
   return `${SEPARATOR}@${Math.round(time * 100) / 100}`;
 }
