@@ -69,8 +69,8 @@ export default async function run() {
     await page.waitForTimeout(200);
     const afterMention = await ta.inputValue();
     r.check(
-      "キーボードだけで話者を確定できる",
-      afterMention.startsWith("@県教委/山田 "),
+      "キーボードだけで話者を確定できる（確定すると常に改行が入る）",
+      afterMention.startsWith("@県教委/山田\n"),
       JSON.stringify(afterMention.slice(0, 20))
     );
 
@@ -125,6 +125,28 @@ export default async function run() {
     );
     r.log("進捗表示:", progress?.trim());
     r.check("未割り当て件数が表示される", /全 \d+ ブロック中/.test(progress ?? ""));
+
+    // 話者の付け替え：既存の @ を消して打ち直したとき、直後に元からあった
+    // 改行が残っていても二重に改行が入らない（空行が増えない）ことを確認する
+    await page.evaluate(() => {
+      const el = document.querySelector("textarea.editor-input");
+      el.focus();
+      el.setSelectionRange(0, "@県教委/山田".length);
+      document.execCommand("delete");
+    });
+    await page.keyboard.type("@");
+    await page.waitForSelector(".suggest");
+    await page.keyboard.type("太田");
+    await page.waitForTimeout(150);
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(200);
+    const reassigned = await ta.inputValue();
+    r.check(
+      "話者を付け替えても改行が重複せず、空行が増えない",
+      reassigned.startsWith("@●●小/太田\n") &&
+        !reassigned.startsWith("@●●小/太田\n\n"),
+      JSON.stringify(reassigned.slice(0, 20))
+    );
 
     // 見出し
     await page.evaluate(() => {
@@ -260,7 +282,7 @@ export default async function run() {
     r.check(
       "再読み込みしても本文が残る",
       (await page.locator("textarea.editor-input").inputValue()).includes(
-        "@県教委/山田"
+        "@●●小/太田"
       )
     );
     r.check(

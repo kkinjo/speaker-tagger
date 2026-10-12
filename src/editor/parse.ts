@@ -19,7 +19,12 @@ export type Block = {
   end: number;
   /** 見出しブロックの表示文字列 */
   heading: string;
-  /** 割り当てられた話者ラベル。重なり発言では複数入りうる */
+  /**
+   * 割り当てられた話者ラベル。
+   * 1ブロック = 話者1人が原則（重なり表示機能は廃止）。区切り（`--`）を
+   * 入れ忘れて同じブロックに複数の `@` を書いてしまった場合にだけ、
+   * 意図せず複数入る
+   */
   speakers: string[];
   /** @メンションを除いた本文 (改行は保持する) */
   body: string;
@@ -44,25 +49,58 @@ export type ParsedDoc = {
 };
 
 export const SEPARATOR = "--";
-/** `--` / `----` / `--@12.3` のいずれも区切りとして扱う */
-const SEP_RE = /^[ \t　]*-{2,}[ \t　]*(?:@[ \t　]*(\d+(?:\.\d+)?))?[ \t　]*$/;
+/**
+ * 区切り行に書ける時刻の表記。次のいずれも受け付ける。
+ * - 秒：`12.3`（取り込み・Alt+D で自動的に付くのはこの形）
+ * - 分:秒：`1:23` / `1:23.5`（再生バーの表示と同じ形。手で書き足すとき用）
+ * - 時:分:秒：`1:02:03`（1時間を超える会議で、表の「時刻」列と同じ形）
+ * 分・秒の桁は 0〜59。`1:75` のような値は時刻として読まない。
+ */
+const TIME_PART = "\\d+(?:\\.\\d+)?|\\d+:[0-5]?\\d(?:\\.\\d+)?|\\d+:[0-5]?\\d:[0-5]?\\d(?:\\.\\d+)?";
+/** `--` / `----` / `--@12.3` / `--@1:23` / `--@1:02:03` のいずれも区切りとして扱う */
+const SEP_RE = new RegExp(
+  `^[ \\t　]*-{2,}[ \\t　]*(?:@[ \\t　]*(${TIME_PART}))?[ \\t　]*$`
+);
 const HEADING_RE = /^[ \t　]*#+[ \t　]*/;
 
 export function isSeparatorLine(line: string): boolean {
   return SEP_RE.test(line);
 }
 
+/** `12.3` / `1:23.5` / `1:02:03` を秒に直す */
+function parseTimeLabel(label: string): number | null {
+  const v = label
+    .split(":")
+    .reduce((total, part) => total * 60 + Number(part), 0);
+  return Number.isFinite(v) ? v : null;
+}
+
 /** 区切り行に書かれた時刻 (秒)。`--` だけなら null */
 export function separatorTime(line: string): number | null {
   const m = SEP_RE.exec(line);
   if (!m || m[1] === undefined) return null;
-  const v = Number(m[1]);
-  return Number.isFinite(v) ? v : null;
+  return parseTimeLabel(m[1]);
 }
 
-/** 時刻付きの区切り行を作る。時刻が分からないときは `--` のまま */
-export function separatorLine(time: number | null): string {
+/**
+ * 時刻付きの区切り行を作る。時刻が分からないときは `--` のまま。
+ *
+ * - `"seconds"`（既定）：`--@83.5`。取り込み時に使う（10ms 単位まで残す）
+ * - `"hms"`：`--@0:01:23`。Alt+D で手元の再生位置から入れるときに使う。
+ *   時は 0 でも省かず、秒は切り捨てる（再生が発言の少し手前から始まるように）
+ */
+export function separatorLine(
+  time: number | null,
+  style: "seconds" | "hms" = "seconds"
+): string {
   if (time == null || !Number.isFinite(time) || time < 0) return SEPARATOR;
+  if (style === "hms") {
+    const total = Math.floor(time);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return `${SEPARATOR}@${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
   // 10ms より細かい桁は音声の頭出しに使わないので落とす
   return `${SEPARATOR}@${Math.round(time * 100) / 100}`;
 }

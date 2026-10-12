@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { kv, keys } from "@/lib/kv";
 import { currentUser } from "@/lib/auth";
 import { loadOwned, removeFromIndex, upsertIndex } from "@/lib/projects";
+import { isPresetId } from "@/lib/refine";
 import type { Participant, Project } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +53,14 @@ export async function PATCH(req: Request, { params }: Ctx) {
       .map((t) => t.trim())
       .filter(Boolean);
   }
+  // 既存プロジェクトには無いフィールド。未知の id は既定のプリセットに任せる
+  if (isPresetId(patch.promptPresetId)) {
+    next.promptPresetId = patch.promptPresetId;
+  }
+  // メモは人が読むための自由記述。打った内容をそのまま残すため trim もしない。
+  // 送られてきたときだけ書き換える（①②を別タブで開いていても、memo を
+  // 触っていない側が古い内容で上書きしないよう、クライアントは変更時だけ送る）
+  if (typeof patch.memo === "string") next.memo = patch.memo;
   next.updatedAt = Date.now();
 
   await kv.set(keys.project(next.id), next);

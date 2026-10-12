@@ -57,8 +57,20 @@ export default function RawEditor({
   scrollRef,
 }: Props) {
   const mirrorRef = useRef<HTMLDivElement>(null);
+  const suggestRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
   const [suggest, setSuggest] = useState<SuggestState>(CLOSED);
+  /**
+   * Escape で閉じた `@` の位置。同じ `@` に続けて文字を打っても開き直さない
+   * （書きかけの `@…` は未登録の @ と同じく本文として残す）。
+   * カーソルがその `@` から離れたら（改行・空白をまたぐ、`@` を消すなど）解除する。
+   */
+  const dismissedStartRef = useRef<number | null>(null);
+  /**
+   * ピッカーを開いた（または絞り込んだ）ときのカーソル位置。
+   * これと違う位置へカーソルが動いたら、入力以外の操作で動かしたとみなして閉じる。
+   */
+  const typedCaretRef = useRef<number | null>(null);
 
   // テキストエリアは非制御。React に value を渡すと、更新のたびに
   // textarea の defaultValue が入れ直され、長い議事録では本文全体の
@@ -107,8 +119,17 @@ export default function RawEditor({
     });
   }, [participants, mru, suggest.query]);
 
+  /**
+   * ピッカーの開閉を判定する。
+   *
+   * 開くのは文字を入力したとき（`typed`）だけ。カーソル移動（矢印キー・
+   * クリック・確定や Escape の keyup）では閉じることはあっても開かない。
+   * 以前はカーソル移動でも開いていたため、カーソルが `@所属/氏名` の直後や
+   * 途中に来るたびに開き、上下キーを候補選択に取られて本文へ戻れなかった
+   * （Escape や Enter で閉じても、その keyup で即座に開き直していた）。
+   */
   const refreshSuggest = useCallback(
-    (ta: HTMLTextAreaElement) => {
+    (ta: HTMLTextAreaElement, typed: boolean) => {
       if (composingRef.current) return;
       const caret = ta.selectionStart;
       const found =
@@ -116,9 +137,26 @@ export default function RawEditor({
           ? activeMentionQuery(ta.value, caret)
           : null;
       if (!found || participants.length === 0) {
+        dismissedStartRef.current = null;
         setSuggest((s) => (s.open ? CLOSED : s));
         return;
       }
+      if (!typed) {
+        // 入力以外でカーソルが動いたら（矢印キー・Home/End・クリック）閉じる。
+        // 同じ `@…` の中での移動でも閉じる。開いたままだと、移動先で Enter を
+        // 押したときにそこで候補が確定してしまう。日本語は語の間に空白が無く、
+        // `@山` の後ろに本文が続いていると → で本文側へ動かしても同じ `@…` の
+        // 続きに見えるため、位置が変わったかどうかで判断する
+        if (caret !== typedCaretRef.current) setSuggest((s) => (s.open ? CLOSED : s));
+        return;
+      }
+      // Escape で閉じた書きかけの `@` は、未登録の @ と同じく本文として残す
+      if (found.start === dismissedStartRef.current) {
+        setSuggest((s) => (s.open ? CLOSED : s));
+        return;
+      }
+      dismissedStartRef.current = null;
+      typedCaretRef.current = caret;
       const mirror = mirrorRef.current;
       const pos = mirror
         ? caretPosition(mirror, ta.value, found.start)
@@ -135,17 +173,59 @@ export default function RawEditor({
     [participants.length]
   );
 
+  /**
+   * ピッカーが開いた瞬間に1回だけ、候補全体が見えるまで左ペインを
+   * スクロールする。画面の下のほうで `@` を打つと候補がはみ出すため。
+   *
+   * 依存は open と start だけにしてある。絞り込みで候補や query が
+   * 変わって再描画されても、ここは再発火させない。
+   * 左右のスクロール連動はそのまま効く（右ペインも一緒に動いてよい）。
+   */
+  useLayoutEffect(() => {
+    if (!suggest.open) return;
+    const box = suggestRef.current;
+    const scroller = scrollRef.current;
+    if (!box || !scroller) return;
+    const MARGIN = 8;
+    const boxRect = box.getBoundingClientRect();
+    const viewRect = scroller.getBoundingClientRect();
+    const overflow = boxRect.bottom + MARGIN - viewRect.bottom;
+    if (overflow <= 0) return;
+    // 候補の上端（＝入力中の行のすぐ下）が画面上端より上へ行くほどは動かさない
+    const room = boxRect.top - MARGIN - viewRect.top;
+    const delta = Math.min(overflow, Math.max(0, room));
+    if (delta > 0) scroller.scrollTop += delta;
+  }, [suggest.open, suggest.start, scrollRef]);
+
+  /**
+   * ↑↓ で選んだ候補が、候補の枠（最大 260px）の外に出たら枠の中をスクロールする。
+   * 左ペイン自体は動かさない（開いた瞬間の1回だけ、という上の決めごとを崩さない）。
+   */
+  useLayoutEffect(() => {
+    if (!suggest.open) return;
+    const box = suggestRef.current;
+    const item = box?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!box || !item) return;
+    const PAD = 4; // .suggest の padding
+    if (item.offsetTop < box.scrollTop + PAD) {
+      box.scrollTop = item.offsetTop - PAD;
+    } else if (item.offsetTop + item.offsetHeight > box.scrollTop + box.clientHeight - PAD) {
+      box.scrollTop = item.offsetTop + item.offsetHeight - box.clientHeight + PAD;
+    }
+  }, [suggest.open, suggest.index, candidates]);
+
   const commit = useCallback(
     (participant: Participant) => {
       const ta = textareaRef.current;
       if (!ta) return;
       const label = participantLabel(participant);
       const caret = ta.selectionStart;
-      // 行末なら改行を足してそのまま本文を打ち始められるようにし、
-      // 既存の発言の頭に差し込んだ場合は空白で区切る
-      const lineEnd = ta.value.indexOf("\n", caret);
-      const rest = ta.value.slice(caret, lineEnd < 0 ? undefined : lineEnd);
-      const suffix = rest.trim() === "" ? "\n" : " ";
+      // 1ブロック = 話者1人を徹底するため、メンション確定時は無条件で
+      // 改行を入れる（1ブロックに @ を2つ書いて重ねて表示する運用は廃止）。
+      // カーソル直後にすでに改行があるならそれ以上は足さない。常に足すと、
+      // 話者を付け替える場面（既存の @ を消して打ち直すなど）で元々あった
+      // 改行がそのまま残り、空行が増えてしまうため
+      const suffix = ta.value[caret] === "\n" ? "" : "\n";
       replaceRange(ta, suggest.start, caret, `@${label}${suffix}`);
       onUseSpeaker(participant.id);
       setSuggest(CLOSED);
@@ -153,11 +233,31 @@ export default function RawEditor({
     [onUseSpeaker, suggest.start, textareaRef]
   );
 
+  /** Escape でピッカーを閉じる。以降、上下キーは本文のカーソル移動に戻る */
+  function dismissSuggest() {
+    dismissedStartRef.current = suggest.start;
+    setSuggest(CLOSED);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // IME で変換中のキー（変換確定の Enter など）は IME に任せる
+    if (e.nativeEvent.isComposing || composingRef.current) return;
+    // 念のための安全策：カーソルが候補を開いた位置から動いていたら
+    // （マウス・トラックパッド・IME などで閉じる処理をすり抜けた場合）、
+    // Enter や ↑↓ を候補の操作に使わず、閉じて普通のキーとして通す。
+    // 通してしまうと `@` から今のカーソル位置までが候補で上書きされる
+    const ta = e.currentTarget;
+    if (
+      suggest.open &&
+      (ta.selectionStart !== ta.selectionEnd || ta.selectionStart !== typedCaretRef.current)
+    ) {
+      setSuggest(CLOSED);
+      return;
+    }
     if (!suggest.open || candidates.length === 0) {
       if (suggest.open && e.key === "Escape") {
         e.preventDefault();
-        setSuggest(CLOSED);
+        dismissSuggest();
       }
       return;
     }
@@ -175,7 +275,7 @@ export default function RawEditor({
       commit(candidates[Math.min(suggest.index, candidates.length - 1)]);
     } else if (e.key === "Escape") {
       e.preventDefault();
-      setSuggest(CLOSED);
+      dismissSuggest();
     }
   }
 
@@ -199,16 +299,16 @@ export default function RawEditor({
           onChange={(e) => {
             onChange(e.target.value);
             onCaretChange(e.target.selectionStart);
-            refreshSuggest(e.target);
+            refreshSuggest(e.target, true);
           }}
           onKeyDown={handleKeyDown}
           onKeyUp={(e) => {
             syncCaret();
-            refreshSuggest(e.currentTarget);
+            refreshSuggest(e.currentTarget, false);
           }}
           onClick={(e) => {
             syncCaret();
-            refreshSuggest(e.currentTarget);
+            refreshSuggest(e.currentTarget, false);
           }}
           onSelect={syncCaret}
           onBlur={() => setSuggest(CLOSED)}
@@ -217,12 +317,13 @@ export default function RawEditor({
           }}
           onCompositionEnd={(e) => {
             composingRef.current = false;
-            refreshSuggest(e.currentTarget);
+            refreshSuggest(e.currentTarget, true);
           }}
         />
 
         {suggest.open ? (
           <div
+            ref={suggestRef}
             className="suggest"
             style={{ top: suggest.top, left: suggest.left }}
             // 候補クリックでテキストエリアのフォーカスが外れないようにする

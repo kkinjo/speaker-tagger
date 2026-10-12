@@ -3,7 +3,7 @@ import { normalizeProject } from "../src/lib/types.ts";
 
 /**
  * normalizeProject() の性質を確認する（ブラウザ不要・純粋関数のテスト）。
- * 完了条件: refinements / glossary が無い既存プロジェクトを読んでも壊れず、
+ * 完了条件: refinements / glossary / memo が無い既存プロジェクトを読んでも壊れず、
  * 既にある場合はそのまま保たれる。
  */
 export default async function run() {
@@ -20,6 +20,7 @@ export default async function run() {
     "glossary が無ければ空配列を補う",
     Array.isArray(normalized.glossary) && normalized.glossary.length === 0
   );
+  r.check("memo が無ければ空文字を補う", normalized.memo === "");
   r.check(
     "他のフィールドはそのまま保たれる",
     normalized.id === "p1" && normalized.title === "旧データ"
@@ -29,6 +30,7 @@ export default async function run() {
     id: "p2",
     refinements: { abc123: { text: "整文済み", edited: true, updatedAt: 1 } },
     glossary: ["九附後連"],
+    memo: "  先頭の空白も\n改行もそのまま  ",
   };
   const kept = normalizeProject(withData);
   r.check(
@@ -36,6 +38,10 @@ export default async function run() {
     kept.refinements.abc123?.text === "整文済み"
   );
   r.check("既にある glossary は上書きしない", kept.glossary[0] === "九附後連");
+  r.check(
+    "既にある memo は手を加えずそのまま保つ",
+    kept.memo === "  先頭の空白も\n改行もそのまま  "
+  );
 
   return r.finish();
 }

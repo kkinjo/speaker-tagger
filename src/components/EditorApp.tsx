@@ -27,8 +27,15 @@ import ParticipantsPanel from "./ParticipantsPanel";
 import ImportPanel from "./ImportPanel";
 import HelpModal from "./HelpModal";
 import ProjectNav from "./ProjectNav";
+import MemoPanel from "./MemoPanel";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
+
+/**
+ * Alt+D で再生位置から区切りの時刻を取るとき、何秒前にずらすか。
+ * 話者が替わったのを聞いてから押すので、再生位置は発言の頭より遅れている。
+ */
+const PLAYHEAD_LEAD = 2;
 
 export default function EditorApp({
   project,
@@ -50,6 +57,8 @@ export default function EditorApp({
   const [audioMeta, setAudioMeta] = useState(project.audio);
   const [imported, setImported] = useState(project.imported);
   const [wordData, setWordData] = useState<ProjectWords | null>(words);
+  /** 担当者用のメモ（MemoPanel）。整文には渡さない */
+  const [memo, setMemo] = useState(project.memo);
 
   /* ---- 画面の状態 ---- */
   const [fontSize, setFontSize] = useState(settings.fontSize);
@@ -65,6 +74,19 @@ export default function EditorApp({
   /* ---- 音声 ---- */
   const audioRef = useRef<HTMLAudioElement>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  /**
+   * このページで選んだ音声ファイル。このページを開いている間は、ブラウザへの
+   * 保存の成否にかかわらずこれを再生する（保存に失敗しても聞けるように）。
+   */
+  const pickedAudioRef = useRef<File | null>(null);
+  /**
+   * サーバーには「音声あり」と記録されているが、このブラウザに本体が無い。
+   * ブラウザのデータを消した・別の端末やブラウザで開いた・保存に失敗した、など。
+   * このときは音の出ない再生バーではなく、選び直す画面を出す。
+   */
+  const [audioMissing, setAudioMissing] = useState(false);
+  const [audioSaving, setAudioSaving] = useState(false);
+  const [audioSaveError, setAudioSaveError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -115,25 +137,41 @@ export default function EditorApp({
   /* ---- 保存 ---- */
   const dirtyRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const payloadRef = useRef({ title, rawText, participants, mru, audioMeta });
-  payloadRef.current = { title, rawText, participants, mru, audioMeta };
+  const payloadRef = useRef({ title, rawText, participants, mru, audioMeta, memo });
+  payloadRef.current = { title, rawText, participants, mru, audioMeta, memo };
   const firstRender = useRef(true);
+  /**
+   * サーバーにあると分かっているメモ。これと違うときだけ PATCH に memo を含める。
+   * ①と②を別タブで開いていても、メモを触っていない側が古い内容で上書きしないようにする
+   */
+  const savedMemoRef = useRef(project.memo);
+
+  const savePayload = () => {
+    const p = payloadRef.current;
+    const body: Record<string, unknown> = {
+      title: p.title,
+      rawText: p.rawText,
+      participants: p.participants,
+      mru: p.mru,
+      audio: p.audioMeta,
+    };
+    if (p.memo !== savedMemoRef.current) body.memo = p.memo;
+    return body;
+  };
+  const savePayloadRef = useRef(savePayload);
+  savePayloadRef.current = savePayload;
 
   const save = useCallback(async () => {
     setSaveState("saving");
+    const body = savePayloadRef.current();
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: payloadRef.current.title,
-          rawText: payloadRef.current.rawText,
-          participants: payloadRef.current.participants,
-          mru: payloadRef.current.mru,
-          audio: payloadRef.current.audioMeta,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("save failed");
+      if (typeof body.memo === "string") savedMemoRef.current = body.memo;
       dirtyRef.current = false;
       setSaveState("saved");
     } catch {
@@ -153,7 +191,15 @@ export default function EditorApp({
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [title, rawText, participants, mru, audioMeta, save]);
+  }, [title, rawText, participants, mru, audioMeta, memo, save]);
+
+  // 音声をブラウザへ保存している間に画面を移ると、保存が中断されて外れてしまう
+  useEffect(() => {
+    if (!audioSaving) return;
+    const beforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [audioSaving]);
 
   // 未保存のまま閉じようとしたら、送れるだけ送りつつ引き止める
   useEffect(() => {
@@ -165,13 +211,7 @@ export default function EditorApp({
       void fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: payloadRef.current.title,
-          rawText: payloadRef.current.rawText,
-          participants: payloadRef.current.participants,
-          mru: payloadRef.current.mru,
-          audio: payloadRef.current.audioMeta,
-        }),
+        body: JSON.stringify(savePayloadRef.current()),
         keepalive: true,
       });
     };
@@ -184,18 +224,16 @@ export default function EditorApp({
   }, [project.id]);
 
   /* ---- 表示設定の保存 ---- */
-  const settingsRef = useRef<UserSettings>(settings);
+  // この画面で変える設定だけを送る。サーバー側で既存の設定に重ねるので、
+  // ③専用の設定（exportIncludeTime など）やメモの開閉（MemoPanel が自分で送る）を
+  // 別タブで変えていても、ここから古い値で上書きしない
+  const settingsRef = useRef<Partial<UserSettings>>({});
   settingsRef.current = {
     fontSize,
     paneMode,
     playbackRate: rate,
     followPlayback: follow,
     syncScroll,
-    // 出力画面（③）専用の設定。①では変更しないので、初期値をそのまま送り返す
-    // （settings は prop なのでマウント中は不変）
-    exportIncludeTime: settings.exportIncludeTime,
-    exportIncludeSpeaker: settings.exportIncludeSpeaker,
-    exportUseRefined: settings.exportUseRefined,
   };
 
   const saveSettings = useCallback((keepalive: boolean) => {
@@ -223,14 +261,24 @@ export default function EditorApp({
   useEffect(() => {
     let url: string | null = null;
     let cancelled = false;
-    if (audioMeta) {
+    setAudioMissing(false);
+    const picked = pickedAudioRef.current;
+    if (!audioMeta) {
+      setAudioUrl(null);
+    } else if (picked && picked.name === audioMeta.name && picked.size === audioMeta.size) {
+      url = URL.createObjectURL(picked);
+      setAudioUrl(url);
+    } else {
+      setAudioUrl(null);
       void getAudio(project.id).then((blob) => {
-        if (cancelled || !blob) return;
+        if (cancelled) return;
+        if (!blob) {
+          setAudioMissing(true);
+          return;
+        }
         url = URL.createObjectURL(blob);
         setAudioUrl(url);
       });
-    } else {
-      setAudioUrl(null);
     }
     return () => {
       cancelled = true;
@@ -420,11 +468,20 @@ export default function EditorApp({
     const before = ta.value.slice(0, at);
     const prefix = before.length === 0 || before.endsWith("\n") ? "" : "\n";
 
-    // ブロックを分割するこの瞬間にだけ単語データを引き、出てきた時刻を
-    // 区切り記号へ焼き付ける。以後この時刻は本文の編集では変わらない。
-    // 単語データで引けないときは、いま聞いている再生位置で代用する。
-    const fromWords =
-      timing.map && wordData
+    // 区切りに入れる時刻を、ブロックを分割するこの瞬間に決めて焼き付ける。
+    // 以後この時刻は本文の編集では変わらない。
+    // 音声を再生・頭出ししているなら、いま聞いている再生位置を使う
+    // （聞きながら話者の切り替わりで Alt+D を押す使い方のため）。
+    // 押すのは発言を聞いてからなので、再生位置は発言の頭より遅れている。
+    // PLAYHEAD_LEAD 秒だけ前にずらし、頭出しで発言の頭から聞けるようにする。
+    // 再生位置が無いときだけ、カーソル位置から単語データで引いた時刻を使う。
+    // 単語データの時刻は発言の頭そのものなので、ずらさない。
+    const playhead = audioRef.current?.currentTime ?? 0;
+    const fromPlayhead =
+      audioUrl && playhead > 0 ? Math.max(0, playhead - PLAYHEAD_LEAD) : null;
+    const time =
+      fromPlayhead ??
+      (timing.map && wordData
         ? timeAtOffset(
             at,
             doc.normOffsets,
@@ -432,11 +489,10 @@ export default function EditorApp({
             wordData.normWordIdx,
             wordData.words
           )
-        : null;
-    const playhead = audioRef.current?.currentTime ?? 0;
-    const time = fromWords ?? (audioUrl && playhead > 0 ? playhead : null);
+        : null);
 
-    replaceRange(ta, at, ta.selectionEnd, `${prefix}${separatorLine(time)}\n`);
+    // 手で読み書きしやすいよう、表の「時刻」列と同じ 時:分:秒 の形で入れる
+    replaceRange(ta, at, ta.selectionEnd, `${prefix}${separatorLine(time, "hms")}\n`);
   }, [timing.map, wordData, doc.normOffsets, audioUrl]);
 
   const openMention = useCallback(() => {
@@ -531,7 +587,12 @@ export default function EditorApp({
       );
     };
 
+    /** メモ（MemoPanel）の中か。生テキストを書き換えるショートカットを効かせない */
+    const inMemo = (el: EventTarget | null) =>
+      el instanceof Element && el.closest(".memo-panel") !== null;
+
     const onKey = (e: KeyboardEvent) => {
+      // メモの textarea は入力欄なので、Space では再生しない（下の isTextField）。
       // 入力欄の外なら Space だけで再生/一時停止できる。
       // 入力欄の中では Shift+Space（Ctrl+Space は Windows/macOS で
       // 入力ソース切り替え等の OS 標準ショートカットに割り当てられて
@@ -544,6 +605,11 @@ export default function EditorApp({
         }
       }
       if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      // メモに書いている最中に、区切り・話者の挿入や未割り当てへの移動で
+      // 生テキスト側を書き換えたりフォーカスを奪ったりしない
+      if (inMemo(e.target) && (e.code === "KeyD" || e.code === "KeyA" || e.code === "KeyJ")) {
+        return;
+      }
 
       switch (e.code) {
         case "ArrowLeft":
@@ -623,12 +689,28 @@ export default function EditorApp({
   }
 
   async function pickAudio(file: File) {
-    await putAudio(project.id, file);
+    // 保存の完了を待たずに再生できるようにする（大きなファイルは保存に時間がかかる）
+    pickedAudioRef.current = file;
+    setAudioSaveError(null);
     setAudioMeta({ name: file.name, size: file.size, type: file.type });
+    setAudioSaving(true);
+    try {
+      await putAudio(project.id, file);
+    } catch (e) {
+      const reason =
+        e instanceof DOMException
+          ? `${e.name}${e.message ? `：${e.message}` : ""}`
+          : String(e);
+      setAudioSaveError(reason);
+    } finally {
+      setAudioSaving(false);
+    }
   }
 
   async function removeAudio() {
     await deleteAudio(project.id);
+    pickedAudioRef.current = null;
+    setAudioSaveError(null);
     setAudioMeta(null);
     setPlaying(false);
     setCurrentTime(0);
@@ -783,11 +865,13 @@ export default function EditorApp({
                   参加者を登録する（<kbd>@</kbd> の候補になります）
                 </span>
               </li>
-              <li className={audioMeta ? "done" : ""}>
-                <span className="num">{audioMeta ? "✓" : "3"}</span>
+              <li className={audioMeta && audioUrl ? "done" : ""}>
+                <span className="num">{audioMeta && audioUrl ? "✓" : "3"}</span>
                 <span>
                   音声ファイルを取り込む（任意。聞きながら編集できます）
-                  {audioMeta ? `　${audioMeta.name}（${formatBytes(audioMeta.size)}）` : ""}
+                  {audioMeta && audioUrl
+                    ? `　${audioMeta.name}（${formatBytes(audioMeta.size)}）`
+                    : ""}
                 </span>
               </li>
               <li>
@@ -862,7 +946,11 @@ export default function EditorApp({
       </div>
 
       <AudioBar
-        hasAudio={Boolean(audioMeta)}
+        hasAudio={Boolean(audioMeta && audioUrl)}
+        loading={Boolean(audioMeta && !audioUrl && !audioMissing)}
+        missingName={audioMeta && audioMissing ? audioMeta.name : null}
+        saving={audioSaving}
+        saveError={audioSaveError}
         fileName={audioMeta?.name ?? null}
         playing={playing}
         currentTime={currentTime}
@@ -876,6 +964,14 @@ export default function EditorApp({
         onFollowChange={setFollow}
         onPickFile={(file) => void pickAudio(file)}
         onRemoveAudio={() => void removeAudio()}
+      />
+
+      {/* 右下に浮かせる。開くと表（「左のみ」では編集欄）の上に重なる */}
+      <MemoPanel
+        value={memo}
+        onChange={setMemo}
+        initialOpen={settings.memoOpen}
+        position="bottom-right"
       />
 
       {audioUrl ? (

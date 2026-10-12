@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import { kv, keys } from "@/lib/kv";
-import { createSession, hashPassword, newId, newSalt } from "@/lib/auth";
+import { createSession, hashPassword, newId, newSalt, signupEnabled } from "@/lib/auth";
 import { DEFAULT_SETTINGS, type User } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  // 画面のタブを隠すだけでは API を直接呼べば登録できてしまうため、ここで止める。
+  // 入力の検証より先に返し、既存のユーザー名の有無も漏らさない
+  if (!signupEnabled()) {
+    return NextResponse.json(
+      { error: "新規登録は現在受け付けていません。" },
+      { status: 403 }
+    );
+  }
   const { username, password } = (await req.json()) as {
     username?: string;
     password?: string;

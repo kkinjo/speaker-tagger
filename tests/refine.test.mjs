@@ -1,11 +1,27 @@
 import { buildFixtures } from "./fixtures.mjs";
 import { createProject, importJson, launch, newProject, reporter } from "./helpers.mjs";
+import { setStubMode, stubCalls } from "./anthropicStub.mjs";
 
 /**
- * 整文画面の UI（第4章 / 第8章 実装の順序 #5）。
- * この段階では Anthropic API を呼ばず、ダミー実装（src/editor/refineClient.ts）
- * で代替している。完了条件: ボタンを押すと3列目にダミー文字列が入る。
- * ステータス遷移・一括変換・中断・保存・再開がすべて動く。
+ * 「一括変換」ボタンを押し、通常の件数確認モーダルが出たら「実行」を押して
+ * 実際に変換を始める。手動修正済みの上書きモーダルが優先して出る場面
+ * （「変換済みの行もやり直す」チェックがオンで、対象に手動修正済みの行が
+ * 含まれる場合）では使わない。その場合は個別に `.confirm-modal` の文言を
+ * 確認してから「実行」または「キャンセル」を押すこと。
+ */
+async function runBulkViaModal(page) {
+  await page.getByRole("button", { name: "一括変換" }).click();
+  await page.waitForSelector(".confirm-modal");
+  await page.getByRole("button", { name: "実行" }).click();
+}
+
+/**
+ * 整文画面（第4章 / 第5章）。
+ *
+ * 整文は `/api/refine` 経由で Anthropic API を呼ぶ。テストでは本物の API では
+ * なくスタブ（tests/anthropicStub.mjs）に向け、成功時は「原文 + (ダミー整文)」を
+ * 返させる。429 / 5xx / max_tokens（出力が途中で打ち切られた場合）を意図して
+ * 起こし、第5.5章のエラー処理も確認する。
  */
 export default async function run() {
   const files = buildFixtures();
@@ -160,9 +176,30 @@ export default async function run() {
       { timeout: 6000 }
     );
 
-    // --- 一括変換：3列目にダミー文字列が入る ---
+    // --- 一括変換ボタンは毎回、件数確認モーダルを挟む ---
+    await setStubMode("ok");
     // 1行は上で「原文のまま確定」したので、一括変換の対象は残り8行
     await page.getByRole("button", { name: "一括変換" }).click();
+    await page.waitForSelector(".confirm-modal");
+    r.check(
+      "件数確認モーダルに対象件数が出る",
+      (await page.locator(".confirm-modal-message").textContent()) ===
+        "8件を一括変換します。よろしいですか？"
+    );
+
+    // --- キャンセルすると何も始まらない ---
+    await page.getByRole("button", { name: "キャンセル" }).click();
+    await page.waitForTimeout(300);
+    r.check(
+      "キャンセルすると変換は始まらない",
+      (await page.locator(".confirm-modal").count()) === 0 &&
+        (await page.locator(".refine-status-done").count()) === 0
+    );
+
+    // --- 実行を押すまで変換は始まらない ---
+    await page.getByRole("button", { name: "一括変換" }).click();
+    await page.waitForSelector(".confirm-modal");
+    await page.getByRole("button", { name: "実行" }).click();
     await page.waitForFunction(
       () => document.querySelectorAll(".refine-status-done").length >= 8,
       null,
@@ -177,7 +214,13 @@ export default async function run() {
       .locator("table.refine-table textarea")
       .nth(1)
       .inputValue();
-    r.check("3列目にダミー文字列が入る", firstText.endsWith("(ダミー整文)"), firstText);
+    r.check("3列目に API の応答が入る", firstText.endsWith("(ダミー整文)"), firstText);
+    r.check(
+      "整文対象の本文が API に渡っている（前後の行ではなく対象発言）",
+      firstText ===
+        `${await page.locator("table.refine-table .refine-body").nth(1).textContent()}(ダミー整文)`,
+      firstText
+    );
     r.check(
       "進捗表示が 9/9 になる",
       /9\s*\/\s*9/.test((await page.locator(".refine-progress").textContent()) ?? "")
@@ -225,17 +268,25 @@ export default async function run() {
       { timeout: 6000 }
     );
 
-    // --- 個別再変換：手動修正済みの行は確認を挟む（第4章 4.5） ---
-    page.once("dialog", (d) => d.dismiss());
+    // --- 個別再変換：手動修正済みの行は上書き確認モーダルを挟む（第4章 4.5） ---
     await row2.locator('button[title="この行を再変換"]').click();
+    await page.waitForSelector(".confirm-modal");
+    r.check(
+      "個別再変換の上書き確認は1行分の文言になる",
+      (await page.locator(".confirm-modal-message").textContent()) ===
+        "この行は手動で修正済みです。上書きすると修正内容は失われます。よろしいですか？"
+    );
+    await page.getByRole("button", { name: "キャンセル" }).click();
     await page.waitForTimeout(300);
     r.check(
       "確認をキャンセルすると手動修正した内容が残る",
-      (await secondTextarea.inputValue()) === "手で直したテキスト"
+      (await secondTextarea.inputValue()) === "手で直したテキスト" &&
+        (await page.locator(".confirm-modal").count()) === 0
     );
 
-    page.once("dialog", (d) => d.accept());
     await row2.locator('button[title="この行を再変換"]').click();
+    await page.waitForSelector(".confirm-modal");
+    await page.getByRole("button", { name: "実行" }).click();
     await page.waitForFunction(
       () => {
         const els = document.querySelectorAll("table.refine-table textarea");
@@ -268,6 +319,260 @@ export default async function run() {
         (await page.locator(".refine-status-edited").count()) === 1
     );
 
+    /* ---- エラー処理（第5.5章） ---- */
+    const errorUrl = await createProject(page, "エラー処理のテスト");
+    await importJson(page, files.sample);
+    await page.waitForFunction(
+      () => document.querySelector(".save-state")?.textContent?.includes("保存済み"),
+      null,
+      { timeout: 8000 }
+    );
+    await page.goto(errorUrl + "/refine");
+    await page.waitForSelector("table.refine-table");
+    const errorRows = await page
+      .locator("table.refine-table tbody tr:not(.refine-heading-row)")
+      .count();
+
+    // --- 429：即座にループを停止し、リトライしない ---
+    await setStubMode("429");
+    await runBulkViaModal(page);
+    await page.waitForSelector(".refine-error-note", { timeout: 10000 });
+    await page.waitForTimeout(300);
+    const callsAfter429 = await stubCalls();
+    r.check(
+      "429 なら1行目で停止する（後続の行は処理しない）",
+      (await page.locator(".refine-status-error").count()) === 1 &&
+        (await page.locator(".refine-status-empty").count()) === errorRows - 1
+    );
+    r.check(
+      "429 はリトライしない（API 呼び出しは1回だけ）",
+      callsAfter429 === 1,
+      `calls=${callsAfter429}`
+    );
+    r.check(
+      "停止した理由が画面に出る",
+      ((await page.locator(".refine-error-note").textContent()) ?? "").includes("中断")
+    );
+
+    // --- 5xx：1回だけリトライし、駄目なら失敗にして次の行へ進む ---
+    await setStubMode("500");
+    await runBulkViaModal(page);
+    await page.waitForFunction(
+      (total) => document.querySelectorAll(".refine-status-error").length >= total,
+      errorRows,
+      { timeout: 30000 }
+    );
+    await page.waitForTimeout(500);
+    const callsAfter500 = await stubCalls();
+    r.check(
+      "5xx でも全行を処理して進む（途中で止まらない）",
+      (await page.locator(".refine-status-error").count()) === errorRows
+    );
+    r.check(
+      "5xx は1回だけリトライする（1行あたり2回）",
+      callsAfter500 === errorRows * 2,
+      `calls=${callsAfter500} rows=${errorRows}`
+    );
+
+    // --- 失敗した行は個別再変換ボタンから復旧できる（第5.5章）。
+    //     手動修正済みではないので、上書き確認モーダルは出さず即座に実行する ---
+    await setStubMode("ok");
+    await page
+      .locator("table.refine-table tbody tr:not(.refine-heading-row)")
+      .first()
+      .locator('button[title^="この行を再変換"]')
+      .click();
+    r.check(
+      "手動修正済みでない行の再変換はモーダルを出さない",
+      (await page.locator(".confirm-modal").count()) === 0
+    );
+    await page.waitForFunction(
+      () => document.querySelectorAll(".refine-status-done").length === 1,
+      null,
+      { timeout: 10000 }
+    );
+    r.check(
+      "失敗した行は個別再変換ボタンから復旧できる",
+      (await page.locator(".refine-status-done").count()) === 1 &&
+        (await page.locator(".refine-status-error").count()) === errorRows - 1
+    );
+
+    /* ---- max_tokens で打ち切られた場合は失敗として扱う ---- */
+    // 429/5xx とは別プロジェクトで確認する（前段の失敗・復旧の状態と混ざらないように）
+    const truncUrl = await createProject(page, "max_tokens のテスト");
+    await importJson(page, files.sample);
+    await page.waitForFunction(
+      () => document.querySelector(".save-state")?.textContent?.includes("保存済み"),
+      null,
+      { timeout: 8000 }
+    );
+    await page.goto(truncUrl + "/refine");
+    await page.waitForSelector("table.refine-table");
+    const truncRows = await page
+      .locator("table.refine-table tbody tr:not(.refine-heading-row)")
+      .count();
+
+    await setStubMode("max_tokens");
+    await runBulkViaModal(page);
+    await page.waitForFunction(
+      (total) => document.querySelectorAll(".refine-status-error").length >= total,
+      truncRows,
+      { timeout: 30000 }
+    );
+    await page.waitForTimeout(300);
+    const callsAfterTruncated = await stubCalls();
+    r.check(
+      "max_tokens で打ち切られた応答は成功扱いにせず、行を「失敗」にする",
+      (await page.locator(".refine-status-error").count()) === truncRows
+    );
+    r.check(
+      "429 とは違い、途中で止まらず最後の行まで処理する",
+      (await page.locator(".refine-status-empty").count()) === 0
+    );
+    r.check(
+      "max_tokens はリトライしない（1行あたり1回。5xx と違い再送しても再発しやすいため）",
+      callsAfterTruncated === truncRows,
+      `calls=${callsAfterTruncated} rows=${truncRows}`
+    );
+    r.check(
+      "失敗理由に「出力が途中で切れた」旨が出る",
+      ((await page.locator(".refine-error-note").textContent()) ?? "").includes("切れ")
+    );
+
+    // 個別再変換から復旧できる（第5.5章）
+    await setStubMode("ok");
+    await page
+      .locator("table.refine-table tbody tr:not(.refine-heading-row)")
+      .first()
+      .locator('button[title^="この行を再変換"]')
+      .click();
+    await page.waitForFunction(
+      () => document.querySelectorAll(".refine-status-done").length === 1,
+      null,
+      { timeout: 10000 }
+    );
+    r.check(
+      "打ち切られて失敗した行も個別再変換ボタンから復旧できる",
+      (await page.locator(".refine-status-done").count()) === 1
+    );
+
+    /* ---- プリセット（第5.4章 / 文体の切り替え） ---- */
+    r.check(
+      "既定のプリセットは「公式議事録」",
+      (await page.getByLabel("プロンプトのプリセット").inputValue()) === "formal"
+    );
+    await page.getByLabel("プロンプトのプリセット").selectOption("plain");
+    r.check(
+      "切り替えても既存の整文結果は変わらない旨が画面に出る",
+      ((await page.locator(".refine-note").textContent()) ?? "").includes(
+        "変換済み・手修正済みの行はそのまま"
+      )
+    );
+    const doneBefore = await page
+      .locator("table.refine-table textarea")
+      .first()
+      .inputValue();
+    await page.waitForFunction(
+      () => document.querySelector(".save-state")?.textContent?.includes("保存済み"),
+      null,
+      { timeout: 8000 }
+    );
+    await page.reload();
+    await page.waitForSelector("table.refine-table");
+    r.check(
+      "選んだプリセットは保存され、再読み込みしても残る",
+      (await page.getByLabel("プロンプトのプリセット").inputValue()) === "plain"
+    );
+    r.check(
+      "プリセットを切り替えても既存の refinements は変わらない",
+      (await page.locator("table.refine-table textarea").first().inputValue()) ===
+        doneBefore,
+      doneBefore
+    );
+
+    /* ---- 一括変換 + 手動修正済みの上書き（優先順位。連続してモーダルを2つ出さない） ---- */
+    const overwriteUrl = await createProject(page, "上書き確認のテスト");
+    await importJson(page, files.sample);
+    await page.waitForFunction(
+      () => document.querySelector(".save-state")?.textContent?.includes("保存済み"),
+      null,
+      { timeout: 8000 }
+    );
+    await page.goto(overwriteUrl + "/refine");
+    await page.waitForSelector("table.refine-table");
+    const overwriteRows = await page
+      .locator("table.refine-table tbody tr:not(.refine-heading-row)")
+      .count();
+
+    // まず全行を変換しておく
+    await setStubMode("ok");
+    await runBulkViaModal(page);
+    await page.waitForFunction(
+      (total) => document.querySelectorAll(".refine-status-done").length >= total,
+      overwriteRows,
+      { timeout: 20000 }
+    );
+
+    // 1行だけ手で直し、「手修正済み」にしておく
+    const overwriteRow = page
+      .locator("table.refine-table tbody tr:not(.refine-heading-row)")
+      .first();
+    await overwriteRow.locator("textarea").fill("手で直したテキスト（上書きテスト）");
+    await page.locator(".refine-toolbar").click();
+    await page.waitForFunction(
+      () => document.querySelector(".save-state")?.textContent?.includes("保存済み"),
+      null,
+      { timeout: 8000 }
+    );
+    r.check(
+      "この行は手修正済みになる",
+      (await overwriteRow.locator(".refine-status-edited").count()) === 1
+    );
+
+    // 「変換済みの行もやり直す」をオンにして一括変換 → 上書き確認モーダルだけが出る
+    // （件数確認モーダルは出さない。連続して2つ出さない）
+    await page.getByLabel("変換済みの行もやり直す").check();
+    await setStubMode("ok"); // 以降の呼び出し回数をここから数える
+    await page.getByRole("button", { name: "一括変換" }).click();
+    await page.waitForSelector(".confirm-modal");
+    r.check(
+      "手動修正済みの行が対象に含まれる場合、上書き確認モーダルだけが出る",
+      (await page.locator(".confirm-modal").count()) === 1 &&
+        (await page.locator(".confirm-modal-message").textContent()) ===
+          "このうち1件は手動で修正済みです。上書きすると修正内容は失われます。よろしいですか？"
+    );
+
+    // --- キャンセルすると何も起きない ---
+    await page.getByRole("button", { name: "キャンセル" }).click();
+    await page.waitForTimeout(300);
+    r.check(
+      "キャンセルすると上書きは起きない（手修正済みのまま。API も呼ばれない）",
+      (await page.locator(".confirm-modal").count()) === 0 &&
+        (await overwriteRow.locator(".refine-status-edited").count()) === 1 &&
+        (await stubCalls()) === 0
+    );
+
+    // --- 実行すると、手動修正済みの行も含めて全行が上書きされる ---
+    await page.getByRole("button", { name: "一括変換" }).click();
+    await page.waitForSelector(".confirm-modal");
+    await page.getByRole("button", { name: "実行" }).click();
+    await page.waitForFunction(
+      (total) => document.querySelectorAll(".refine-status-done").length >= total,
+      overwriteRows,
+      { timeout: 20000 }
+    );
+    const callsAfterOverwrite = await stubCalls();
+    r.check(
+      "実行すると手動修正済みの行も含めて全行が AI変換済みになる",
+      (await page.locator(".refine-status-done").count()) === overwriteRows &&
+        (await page.locator(".refine-status-edited").count()) === 0
+    );
+    r.check(
+      "対象件数ぶん API が呼ばれる（手動修正済みの行も上書き対象に含まれる）",
+      callsAfterOverwrite === overwriteRows,
+      `calls=${callsAfterOverwrite} rows=${overwriteRows}`
+    );
+
     /* ---- 中断・再開（行数の多いデータで確実に間に合わせる） ---- */
     // 同じログイン済みセッションで2つ目の議事録を作る（newProject は
     // ログイン画面から始めるため、ログイン済みだとリダイレクトされて使えない）
@@ -286,6 +591,8 @@ export default async function run() {
     );
 
     await page.getByRole("button", { name: "一括変換" }).click();
+    await page.waitForSelector(".confirm-modal");
+    await page.getByRole("button", { name: "実行" }).click();
     r.check(
       "実行中は「中断」ボタンに切り替わる",
       (await page.getByRole("button", { name: "中断" }).count()) === 1
@@ -320,7 +627,7 @@ export default async function run() {
     );
 
     // 続きから再開すると、残りが完了して全行変換済みになる
-    await page.getByRole("button", { name: "一括変換" }).click();
+    await runBulkViaModal(page);
     await page.waitForFunction(
       (total) => document.querySelectorAll(".refine-status-done").length >= total,
       mediumTotal,

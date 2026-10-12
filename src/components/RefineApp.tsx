@@ -2,11 +2,13 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Refinements } from "@/lib/types";
+import type { PromptPreset } from "@/lib/refine";
 import { parseDoc, type Block } from "@/editor/parse";
 import { blockSourceKey } from "@/editor/refine";
-import { requestRefine } from "@/editor/refineClient";
-import { GLOBAL_GLOSSARY } from "@/lib/glossary";
+import { requestRefine, RefineRequestError } from "@/editor/refineClient";
+import ConfirmModal from "./ConfirmModal";
 import GlossaryPanel from "./GlossaryPanel";
+import MemoPanel from "./MemoPanel";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 
@@ -168,12 +170,27 @@ const Row = memo(function Row({
   );
 });
 
+/** 一括変換ループがリトライ要否を判断するための結果 */
+type RefineOutcome = { ok: true } | { ok: false; error: RefineRequestError };
+
 /**
  * 整文画面（②）。第4章の UI を実装する。
- * この段階では Anthropic API を呼ばず、`requestRefine`（ダミー実装。
- * src/editor/refineClient.ts）で代替する。
+ * 整文は `/api/refine` 経由で Anthropic API を呼ぶ（第5章）。
+ *
+ * `presets` はサーバーコンポーネント側（refine/page.tsx）から渡す。
+ * プロンプト組み立てと API キーの読み取りを含む `@/lib/refine` を
+ * クライアントバンドルへ持ち込まないため。
  */
-export default function RefineApp({ project }: { project: Project }) {
+export default function RefineApp({
+  project,
+  presets,
+  memoOpen,
+}: {
+  project: Project;
+  presets: PromptPreset[];
+  /** UserSettings.memoOpen。①と共通の値 */
+  memoOpen: boolean;
+}) {
   const [refinements, setRefinements] = useState<Refinements>(project.refinements);
   /**
    * この会議固有の固有名詞（第6章）。整文で AI に渡す情報なので、
@@ -181,6 +198,18 @@ export default function RefineApp({ project }: { project: Project }) {
    */
   const [glossary, setGlossary] = useState<string[]>(project.glossary);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
+  /**
+   * 担当者用のメモ（MemoPanel）。人が読むためのもので、整文には渡さない。
+   * `/api/refine` はプロジェクトを読み直してプロンプトを組むが、memo は使わない
+   */
+  const [memo, setMemo] = useState(project.memo);
+  /**
+   * 整文プロンプトのプリセット（第5.4章）。既存プロジェクトには
+   * promptPresetId が無いので、その場合は既定（先頭 = formal）に倒す。
+   */
+  const [presetId, setPresetId] = useState<string>(
+    project.promptPresetId ?? presets[0].id
+  );
   const [transient, setTransient] = useState<Record<string, Transient>>({});
   const [overwriteDone, setOverwriteDone] = useState(false);
   /** 表示の絞り込み（第4章 4.2）。true なら「原文のまま出力」の行だけ */
@@ -194,6 +223,19 @@ export default function RefineApp({ project }: { project: Project }) {
   const [undoNotice, setUndoNotice] = useState<{ key: string; updatedAt: number } | null>(
     null
   );
+  /** 直近の失敗の内容。理由が分からないまま「失敗」だけが並ぶのを避ける */
+  const [lastError, setLastError] = useState<string | null>(null);
+  /**
+   * 一括変換の件数確認モーダル。値は対象件数。null なら閉じている。
+   * 手動修正済みの上書きが絡む場合はこちらではなく `pendingOverwrite` を使う
+   * （両方の条件を満たすときは上書き確認モーダルだけを出す。連続して
+   * モーダルを2つ出さない）。
+   */
+  const [pendingBulkCount, setPendingBulkCount] = useState<number | null>(null);
+  /** 手動修正済みの上書き確認モーダル。null なら閉じている */
+  const [pendingOverwrite, setPendingOverwrite] = useState<
+    { kind: "bulk"; editedCount: number } | { kind: "retry"; block: Block } | null
+  >(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const undoNoticeRef = useRef(undoNotice);
   undoNoticeRef.current = undoNotice;
@@ -209,29 +251,42 @@ export default function RefineApp({ project }: { project: Project }) {
     [doc.blocks]
   );
 
-  // 全体リストと会議固有リストを結合し、重複を取り除く（第6章 6.1）
-  const combinedGlossary = useMemo(() => {
-    return [...new Set([...GLOBAL_GLOSSARY, ...glossary])];
-  }, [glossary]);
-
   /* ---- 保存（2秒デバウンス。第4章 4.4） ---- */
   const dirtyRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const payloadRef = useRef({ refinements, glossary });
-  payloadRef.current = { refinements, glossary };
+  const payloadRef = useRef({ refinements, glossary, presetId, memo });
+  payloadRef.current = { refinements, glossary, presetId, memo };
+  /**
+   * サーバーにあると分かっているメモ。これと違うときだけ PATCH に memo を含める。
+   * ①と②を別タブで開いていても、メモを触っていない側が古い内容で上書きしないようにする
+   */
+  const savedMemoRef = useRef(project.memo);
+
+  const savePayload = () => {
+    const p = payloadRef.current;
+    const body: Record<string, unknown> = {
+      refinements: p.refinements,
+      glossary: p.glossary,
+      promptPresetId: p.presetId,
+    };
+    if (p.memo !== savedMemoRef.current) body.memo = p.memo;
+    return body;
+  };
+  const savePayloadRef = useRef(savePayload);
+  savePayloadRef.current = savePayload;
 
   const save = useCallback(async () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaveState("saving");
+    const body = savePayloadRef.current();
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          refinements: payloadRef.current.refinements,
-          glossary: payloadRef.current.glossary,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("save failed");
+      if (typeof body.memo === "string") savedMemoRef.current = body.memo;
       dirtyRef.current = false;
       setSaveState("saved");
     } catch {
@@ -244,6 +299,18 @@ export default function RefineApp({ project }: { project: Project }) {
     setSaveState("dirty");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => void save(), 2000);
+  }, [save]);
+
+  /**
+   * デバウンス待ちの変更を先に送り切る。
+   *
+   * `/api/refine` は固有名詞とプリセットを保存済みのプロジェクトから読み直す
+   * （クライアントから差し替えられないようにするため）。登録・切り替えた直後に
+   * 変換を始めると保存前の内容で整文されてしまうので、変換を始める前に必ず通す。
+   */
+  const flushSave = useCallback(async () => {
+    if (!dirtyRef.current) return;
+    await save();
   }, [save]);
 
   useEffect(() => () => {
@@ -260,10 +327,7 @@ export default function RefineApp({ project }: { project: Project }) {
       void fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          refinements: payloadRef.current.refinements,
-          glossary: payloadRef.current.glossary,
-        }),
+        body: JSON.stringify(savePayloadRef.current()),
         keepalive: true,
       });
     };
@@ -275,9 +339,29 @@ export default function RefineApp({ project }: { project: Project }) {
     };
   }, [project.id]);
 
+  const handleMemoChange = useCallback(
+    (next: string) => {
+      setMemo(next);
+      scheduleSave();
+    },
+    [scheduleSave]
+  );
+
   const handleGlossaryChange = useCallback(
     (next: string[]) => {
       setGlossary(next);
+      scheduleSave();
+    },
+    [scheduleSave]
+  );
+
+  /**
+   * プリセットの切り替え（第5.4章）。
+   * 以後の変換にだけ効く。既にある refinements には手を触れない。
+   */
+  const handlePresetChange = useCallback(
+    (next: string) => {
+      setPresetId(next);
       scheduleSave();
     },
     [scheduleSave]
@@ -319,17 +403,16 @@ export default function RefineApp({ project }: { project: Project }) {
 
   /* ---- 1行変換 ---- */
   const refineOne = useCallback(
-    async (block: Block) => {
+    async (block: Block): Promise<RefineOutcome> => {
       const key = blockSourceKey(block);
       const idx = utteranceBlocks.indexOf(block);
       setTransient((t) => ({ ...t, [key]: "pending" }));
       try {
         const text = await requestRefine({
+          projectId: project.id,
           body: block.body,
           prevBody: utteranceBlocks[idx - 1]?.body ?? null,
           nextBody: utteranceBlocks[idx + 1]?.body ?? null,
-          participants: project.participants,
-          glossary: combinedGlossary,
         });
         setRefinements((r) => ({
           ...r,
@@ -341,11 +424,19 @@ export default function RefineApp({ project }: { project: Project }) {
           return next;
         });
         scheduleSave();
-      } catch {
+        return { ok: true };
+      } catch (e) {
+        // 「失敗」は保存しない一時状態。個別再変換ボタンから復旧できる（第5.5章）
+        const error =
+          e instanceof RefineRequestError
+            ? e
+            : new RefineRequestError(String(e));
         setTransient((t) => ({ ...t, [key]: "error" }));
+        setLastError(error.message);
+        return { ok: false, error };
       }
     },
-    [utteranceBlocks, project.participants, combinedGlossary, scheduleSave]
+    [utteranceBlocks, project.id, scheduleSave]
   );
 
   /* ---- 手で編集した場合 ---- */
@@ -402,57 +493,138 @@ export default function RefineApp({ project }: { project: Project }) {
     []
   );
 
+  /**
+   * 一括変換の対象を求める。
+   *
+   * `includeEdited` は「手動修正済みの行も含めるか」。上書き確認モーダルで
+   * 実行が押されたあとにだけ true で呼ぶ。false のときは対象外（保護）。
+   */
+  const computeBulkTargets = useCallback(
+    (includeEdited: boolean) =>
+      utteranceBlocks.filter((b) => {
+        const r = refinements[blockSourceKey(b)];
+        if (!r) return true; // 未変換は常に対象
+        if (r.edited) return overwriteDone && includeEdited;
+        return overwriteDone; // 変換済み（未編集）
+      }),
+    [utteranceBlocks, refinements, overwriteDone]
+  );
+
+  /**
+   * 一括変換を実際に実行する。件数確認・上書き確認のモーダルを経由した
+   * あとに呼ばれる（第4章 4.3。確認モーダルは AI の上書きを人が必ず承認する運用に合わせた追加仕様）。
+   */
+  const executeBulk = useCallback(
+    async (targets: Block[]) => {
+      if (targets.length === 0) return;
+
+      // 登録・切り替えたばかりの固有名詞とプリセットで変換されるよう、保存を先に済ませる
+      await flushSave();
+
+      abortRef.current = false;
+      setLastError(null);
+      setRunning(true);
+      for (const block of targets) {
+        if (abortRef.current) break;
+
+        let outcome = await refineOne(block);
+
+        // 429（レート制限・利用上限）はリトライせず即座にループを停止する。
+        // 上限に達している可能性があり、叩き続けると状況が悪化する（第5.5章）
+        if (!outcome.ok && outcome.error.isRateLimited) {
+          setLastError(
+            `レート制限または利用上限に達したため中断しました。しばらく待ってから再開してください。（${outcome.error.message}）`
+          );
+          break;
+        }
+
+        // 5xx・接続失敗は1回だけリトライする（第5.5章）
+        if (!outcome.ok && outcome.error.isRetryable) {
+          if (abortRef.current) break;
+          outcome = await refineOne(block);
+          if (!outcome.ok && outcome.error.isRateLimited) {
+            setLastError(
+              `レート制限または利用上限に達したため中断しました。しばらく待ってから再開してください。（${outcome.error.message}）`
+            );
+            break;
+          }
+        }
+
+        // それでも失敗した行は「失敗」のまま次へ進む。
+        // 復旧は個別再変換ボタンから行う（第5.5章）
+      }
+      setRunning(false);
+    },
+    [refineOne, flushSave]
+  );
+
   /* ---- 個別再変換（第4章 4.5） ---- */
+  const runRetry = useCallback(
+    (block: Block) => {
+      setLastError(null);
+      // 固有名詞・プリセットの変更が未保存なら先に送る（サーバーが読むのは保存済みの値）
+      void flushSave().then(() => refineOne(block));
+    },
+    [refineOne, flushSave]
+  );
+
   const handleRetry = useCallback(
     (block: Block) => {
       const key = blockSourceKey(block);
       if (refinements[key]?.edited) {
-        const ok = window.confirm(
-          "この行は手動で修正済みです。上書きして再変換しますか？"
-        );
-        if (!ok) return;
+        // 手動修正済みの行を上書きする前に必ず確認する。
+        // 修正済みでない行はここを通らず、即座に実行する（現状維持）
+        setPendingOverwrite({ kind: "retry", block });
+        return;
       }
-      void refineOne(block);
+      runRetry(block);
     },
-    [refinements, refineOne]
+    [refinements, runRetry]
   );
 
   /* ---- 一括変換（第4章 4.3） ---- */
-  const runBulk = useCallback(async () => {
+  const startBulk = useCallback(() => {
+    // チェックがオンで、かつ手動修正済みの行が対象に含まれる場合は、
+    // 上書き確認モーダルだけを出す。件数確認モーダルは出さない（連続してモーダルを2つ出さない）
     const editedAmongTargets = overwriteDone
       ? utteranceBlocks.filter((b) => refinements[blockSourceKey(b)]?.edited)
       : [];
-
-    let includeEdited = false;
     if (editedAmongTargets.length > 0) {
-      includeEdited = window.confirm(
-        `手動修正済みの行が ${editedAmongTargets.length} 件あります。\n` +
-          "これらも上書きしてやり直しますか？\n" +
-          "（OK: 上書きする / キャンセル: 手動修正済みの行は保護して進める）"
-      );
+      setPendingOverwrite({ kind: "bulk", editedCount: editedAmongTargets.length });
+      return;
     }
 
-    const targets = utteranceBlocks.filter((b) => {
-      const r = refinements[blockSourceKey(b)];
-      if (!r) return true; // 未変換は常に対象
-      if (r.edited) return overwriteDone && includeEdited;
-      return overwriteDone; // 変換済み（未編集）
-    });
-
+    // 手動修正済みが絡まない場合は、いつも通り件数確認モーダルを出す。
+    // 対象が無ければモーダルも出さず何もしない（従来どおり）
+    const targets = computeBulkTargets(false);
     if (targets.length === 0) return;
+    setPendingBulkCount(targets.length);
+  }, [utteranceBlocks, refinements, overwriteDone, computeBulkTargets]);
 
-    abortRef.current = false;
-    setRunning(true);
-    for (const block of targets) {
-      if (abortRef.current) break;
-      await refineOne(block);
+  /** 件数確認モーダルで「実行」を押した */
+  const confirmBulkCount = useCallback(() => {
+    setPendingBulkCount(null);
+    void executeBulk(computeBulkTargets(false));
+  }, [computeBulkTargets, executeBulk]);
+
+  /** 上書き確認モーダルで「実行」を押した（一括・個別の両方をここで受ける） */
+  const confirmOverwrite = useCallback(() => {
+    const pending = pendingOverwrite;
+    setPendingOverwrite(null);
+    if (!pending) return;
+    if (pending.kind === "bulk") {
+      void executeBulk(computeBulkTargets(true));
+    } else {
+      runRetry(pending.block);
     }
-    setRunning(false);
-  }, [utteranceBlocks, refinements, overwriteDone, refineOne]);
+  }, [pendingOverwrite, computeBulkTargets, executeBulk, runRetry]);
 
   const abort = useCallback(() => {
     abortRef.current = true;
   }, []);
+
+  const selectedPreset =
+    presets.find((p) => p.id === presetId) ?? presets[0];
 
   const saveLabel =
     saveState === "saved"
@@ -471,7 +643,7 @@ export default function RefineApp({ project }: { project: Project }) {
             中断
           </button>
         ) : (
-          <button className="btn btn-sm btn-primary" onClick={() => void runBulk()}>
+          <button className="btn btn-sm btn-primary" onClick={startBulk}>
             一括変換
           </button>
         )}
@@ -487,6 +659,21 @@ export default function RefineApp({ project }: { project: Project }) {
         <span className="refine-progress">
           <strong>{doneCount}</strong> / {utteranceBlocks.length} 行 完了
         </span>
+        <label className="refine-filter">
+          文体
+          <select
+            value={presetId}
+            disabled={running}
+            onChange={(e) => handlePresetChange(e.target.value)}
+            aria-label="プロンプトのプリセット"
+          >
+            {presets.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="refine-filter">
           表示
           <select
@@ -514,6 +701,25 @@ export default function RefineApp({ project }: { project: Project }) {
           {saveLabel}
         </span>
       </div>
+
+      {/* プリセットは以後の変換にだけ効く。既にある結果が書き換わると
+          誤解されないよう、切り替え位置のすぐ下に明示する */}
+      <div className="refine-note">
+        <span>{selectedPreset.hint}</span>
+        <span className="muted">
+          切り替えても、変換済み・手修正済みの行はそのままです。新しい文体にするには、
+          その行を再変換してください。
+        </span>
+      </div>
+
+      {lastError ? (
+        <div className="refine-error-note" role="alert">
+          <span>{lastError}</span>
+          <button className="btn btn-sm" onClick={() => setLastError(null)}>
+            閉じる
+          </button>
+        </div>
+      ) : null}
 
       {glossaryOpen ? (
         <div className="drawer">
@@ -571,6 +777,14 @@ export default function RefineApp({ project }: { project: Project }) {
         </table>
       </div>
 
+      {/* 左下に浮かせる。開くと表の上に重なる。整文には渡さない */}
+      <MemoPanel
+        value={memo}
+        onChange={handleMemoChange}
+        initialOpen={memoOpen}
+        position="bottom-left"
+      />
+
       {/* 原文のまま確定した直後だけ出す取り消しの案内（第4章 4.6）。
           見るだけのつもりでクリックした誤操作を戻せるようにする。
           数秒で自動的に消え、あとに何も残らない */}
@@ -581,6 +795,31 @@ export default function RefineApp({ project }: { project: Project }) {
             取り消す
           </button>
         </div>
+      ) : null}
+
+      {/* 一括変換の件数確認モーダル。実行を押すまで変換は始まらない */}
+      {pendingBulkCount !== null ? (
+        <ConfirmModal
+          message={`${pendingBulkCount}件を一括変換します。よろしいですか？`}
+          onCancel={() => setPendingBulkCount(null)}
+          onConfirm={confirmBulkCount}
+        />
+      ) : null}
+
+      {/* 手動修正済みの上書き確認モーダル。一括・個別のどちらもここで受ける。
+          一括で件数確認モーダルとの両方に該当する場合は、こちらだけを出す
+          （startBulk 側で制御。連続してモーダルを2つ出さない） */}
+      {pendingOverwrite ? (
+        <ConfirmModal
+          danger
+          message={
+            pendingOverwrite.kind === "bulk"
+              ? `このうち${pendingOverwrite.editedCount}件は手動で修正済みです。上書きすると修正内容は失われます。よろしいですか？`
+              : "この行は手動で修正済みです。上書きすると修正内容は失われます。よろしいですか？"
+          }
+          onCancel={() => setPendingOverwrite(null)}
+          onConfirm={confirmOverwrite}
+        />
       ) : null}
     </div>
   );

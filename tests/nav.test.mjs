@@ -37,8 +37,15 @@ export default async function run() {
 
     // 現在地はリンクにならない（自分自身へは飛べない）
     r.check(
-      "現在地はリンクではなく文字表示",
-      (await page.getByRole("link", { name: "話者整理", exact: true }).count()) === 0
+      "現在地はリンクではなく、選択中の表示",
+      (await page.getByRole("link", { name: "話者整理" }).count()) === 0 &&
+        (await page.locator('.project-nav [aria-current="page"]').textContent()) ===
+          "① 話者整理"
+    );
+    r.check(
+      "ヘッダーの3画面は番号付きで順に並ぶ",
+      JSON.stringify(await page.locator(".project-nav .screen-links > *").allTextContents()) ===
+        JSON.stringify(["① 話者整理", "② 整文", "③ 出力"])
     );
 
     // ブラウザの戻る操作が効く（タブ切り替えでなく別URLである証拠）
@@ -58,9 +65,25 @@ export default async function run() {
     // 一覧からも直接遷移できる
     await page.goto(`${BASE}/projects`);
     const row = page.locator(".project-row", { hasText: "ナビゲーションのテスト" });
+    r.check(
+      "一覧の会議名はリンクではない",
+      (await row.getByRole("link", { name: "ナビゲーションのテスト" }).count()) === 0
+    );
+    r.check(
+      "一覧の各行に ①②③ のボタンが並ぶ",
+      JSON.stringify(await row.locator(".screen-links a").allTextContents()) ===
+        JSON.stringify(["① 話者整理", "② 整文", "③ 出力"])
+    );
     await row.getByRole("link", { name: "整文" }).click();
     await page.waitForURL(`**/refine`);
     r.check("一覧から直接②へ遷移できる", page.url().endsWith("/refine"));
+    await page.goto(`${BASE}/projects`);
+    await page
+      .locator(".project-row", { hasText: "ナビゲーションのテスト" })
+      .getByRole("link", { name: "話者整理" })
+      .click();
+    await page.waitForURL(editorUrl);
+    r.check("一覧から直接①へ遷移できる", page.url() === editorUrl);
   } finally {
     await browser.close();
   }

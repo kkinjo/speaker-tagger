@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BASE } from "./helpers.mjs";
+import { STUB_API_URL, startStub } from "./anthropicStub.mjs";
 
 /**
  * ビルド済みのアプリを起動し、全テストを順に流す。
@@ -11,6 +12,7 @@ import { BASE } from "./helpers.mjs";
 
 const port = new URL(BASE).port || "3100";
 let server = null;
+let stub = null;
 let dataDir = null;
 
 async function reachable() {
@@ -24,12 +26,23 @@ async function reachable() {
 
 async function startServer() {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "speaker-tagger-test-"));
+  // 新規登録の停止のテスト（tests/signup.test.mjs）が、同じ保存先で別のサーバーを起動する
+  process.env.TEST_DATA_DIR = dataDir;
+  // `npx next start` は子プロセス（next-server）を生むので、プロセスグループごと
+  // 起動しておく。親だけを kill すると next-server がポートを掴んだまま残り、
+  // 次回の実行が「既に動いているサーバー」としてそれを使い回してしまう
   server = spawn("npx", ["next", "start", "-p", port], {
     stdio: "ignore",
+    detached: true,
     env: {
       ...process.env,
       APP_SECRET: "test-secret",
       DATA_DIR: dataDir,
+      // テストは利用者を都度作るので、新規登録を受け付ける（既定では受け付けない）
+      ALLOW_SIGNUP: "1",
+      // 整文は本物の Anthropic API ではなくスタブへ向ける（tests/anthropicStub.mjs）
+      ANTHROPIC_API_KEY: "test-key",
+      REFINE_API_URL: STUB_API_URL,
       // テストは必ずファイル保存側で動かす（本番の KV を触らない）
       KV_REST_API_URL: "",
       KV_REST_API_TOKEN: "",
@@ -44,26 +57,40 @@ async function startServer() {
   throw new Error(`サーバーが起動しませんでした (${BASE})`);
 }
 
-const started = !(await reachable());
-if (started) {
+// 整文のスタブは、アプリを使い回す場合にも要る（tests/refine.test.mjs が
+// 直接叩いて応答の種類を切り替えるため）。既に動いていればそれを使う。
+try {
+  stub = await startStub();
+} catch (e) {
+  if (e.code !== "EADDRINUSE") throw e;
+  console.log("既に動いている整文スタブを使います");
+}
+
+if (await reachable()) {
+  console.log(`既に動いているサーバーを使います (${BASE})`);
+} else {
   console.log(`サーバーを起動します (${BASE})`);
   await startServer();
-} else {
-  console.log(`既に動いているサーバーを使います (${BASE})`);
 }
 
 const suites = [
   ["sourceKey", "./sourceKey.test.mjs"],
   ["normalizeProject", "./normalizeProject.test.mjs"],
+  ["区切りの時刻表記", "./separator.test.mjs"],
   ["編集", "./editor.test.mjs"],
+  ["話者ピッカー", "./picker.test.mjs"],
   ["音声連動", "./audio.test.mjs"],
+  ["音声の保存", "./audiostore.test.mjs"],
+  ["Alt+D の時刻", "./separatorkey.test.mjs"],
   ["スクロール連動", "./scrollsync.test.mjs"],
   ["画面ナビゲーション", "./nav.test.mjs"],
   ["整文フィールドの保存・読み込み", "./refinements.test.mjs"],
   ["固有名詞の登録", "./glossary.test.mjs"],
   ["整文画面", "./refine.test.mjs"],
+  ["メモ", "./memo.test.mjs"],
   ["出力画面", "./export.test.mjs"],
   ["データ分離", "./isolation.test.mjs"],
+  ["新規登録の停止", "./signup.test.mjs"],
   ["大きな議事録", "./performance.test.mjs"],
 ];
 
@@ -75,7 +102,14 @@ try {
     if (!(await run())) allPassed = false;
   }
 } finally {
-  if (server) server.kill("SIGKILL");
+  if (server) {
+    try {
+      process.kill(-server.pid, "SIGKILL");
+    } catch {
+      server.kill("SIGKILL");
+    }
+  }
+  if (stub) stub.close();
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
 }
 

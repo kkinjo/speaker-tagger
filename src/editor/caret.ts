@@ -28,6 +28,11 @@ export function activeMentionQuery(
   while (i >= 0) {
     const ch = value[i];
     if (ch === "@") {
+      // 区切り行の時刻（`--@12.3`）の @ は話者ではない。ここで開くと、
+      // 矢印キーで区切り行を通過しただけでピッカーが開き、上下キーを
+      // 候補選択に取られて本文へ戻れなくなる
+      const lineStart = value.lastIndexOf("\n", i - 1) + 1;
+      if (/^[ \t　]*-{2,}[ \t　]*$/.test(value.slice(lineStart, i))) return null;
       return { start: i, query: value.slice(i + 1, caret) };
     }
     // 空白・改行・別の @ をまたいだらメンション入力ではない
