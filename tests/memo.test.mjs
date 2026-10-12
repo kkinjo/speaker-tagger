@@ -121,7 +121,17 @@ export default async function run() {
       saved1.settings.exportIncludeTime === true
     );
 
-    /* ---- 高さの上限：画面の 1/3 程度で止まり、中でスクロールする ---- */
+    /* ---- 大きさ：幅 760px・12行分から始まり、画面の 2/3 程度で止まって中でスクロールする ---- */
+    const initial = await memoText.evaluate((el) => ({
+      width: el.getBoundingClientRect().width,
+      height: el.getBoundingClientRect().height,
+      lineHeight: parseFloat(getComputedStyle(el).lineHeight),
+    }));
+    r.check(
+      "幅は 760px 程度、高さは12行分以上ある",
+      initial.width >= 740 && initial.height >= initial.lineHeight * 12,
+      JSON.stringify(initial)
+    );
     await memoText.fill(Array.from({ length: 80 }, (_, i) => `行${i + 1}`).join("\n"));
     const size = await memoText.evaluate((el) => ({
       height: el.getBoundingClientRect().height,
@@ -130,8 +140,9 @@ export default async function run() {
       vh: window.innerHeight,
     }));
     r.check(
-      "長いメモは画面の 1/3 程度で止まり、中でスクロールできる",
-      size.height <= size.vh * 0.34 &&
+      "長いメモは画面の 2/3 程度で止まり、中でスクロールできる",
+      size.height <= size.vh * 0.67 &&
+        size.height >= size.vh * 0.6 &&
         size.scrollHeight > size.height &&
         size.overflowY === "auto",
       JSON.stringify(size)
