@@ -10,7 +10,8 @@ import { useEffect, useRef, useState } from "react";
  *
  * - 画面の隅に `position: fixed` で浮かせる。開いても下の表・編集欄は動かさず、上に重ねる
  * - 閉じているときは小さなタブ「メモ」だけを出す
- * - 中身はプレーンテキストの textarea 1つ。解析・整形はせず、打ったものをそのまま渡す
+ * - 中身はプレーンテキストの textarea 1つ（幅 760px・12行分から伸び、画面の 2/3 程度で止まる）。
+ *   解析・整形はせず、打ったものをそのまま渡す
  * - 保存は親（各画面の既存の保存処理）に任せる。ここは値を上げるだけ
  * - 開閉状態だけはこの部品が `UserSettings.memoOpen` へ直接保存する（①②で共通の値）
  */
@@ -31,7 +32,7 @@ export default function MemoPanel({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const wantFocus = useRef(false);
 
-  // 内容に合わせて伸ばす。上限（画面の 1/3 程度）は CSS の max-height で抑え、
+  // 内容に合わせて伸ばす。上限（画面の 2/3 程度）は CSS の max-height で抑え、
   // 超えた分は textarea の中でスクロールさせる
   useEffect(() => {
     const el = taRef.current;
@@ -98,7 +99,7 @@ export default function MemoPanel({
         onChange={(e) => onChange(e.target.value)}
         placeholder="参加者の正式名称・フルネーム、誤変換されやすい語など"
         aria-label="メモ"
-        rows={6}
+        rows={12}
         spellCheck={false}
       />
     </section>
